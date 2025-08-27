@@ -4,23 +4,19 @@ from typing import Dict, List, Tuple, Any, Optional
 import logging
 import pickle
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import re
 from config.config import Config
+from tools.embeddings import create_embedding_provider, EmbeddingProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FAISSVectorStore:
-    """Simplified vector store for keyword normalization and similarity search using scikit-learn"""
+    """Simplified vector store for keyword normalization and similarity search using configurable embedding providers"""
     
-    def __init__(self, openai_client=None):
+    def __init__(self, embedding_type: str = None, openai_client=None):
         self.openai_client = openai_client
-        self.vectorizer = TfidfVectorizer(
-            max_features=10000,
-            ngram_range=(1, 3),
-            stop_words='english'
-        )
+        self.embedding_provider = create_embedding_provider(embedding_type)
         self.vectors = None
         self.keywords = []
         self.keyword_metadata = []
@@ -52,16 +48,17 @@ class FAISSVectorStore:
             logger.error(f"Error adding categorical values from {table_name}: {e}")
     
     def build_index(self):
-        """Build the vector index from keywords using scikit-learn"""
+        """Build the vector index from keywords using the configured embedding provider"""
         try:
             if not self.keywords:
                 logger.warning("No keywords to build index from")
                 return
             
-            # Create TF-IDF vectors
-            self.vectors = self.vectorizer.fit_transform(self.keywords)
+            # Fit the embedding provider and create vectors
+            self.embedding_provider.fit(self.keywords)
+            self.vectors = self.embedding_provider.transform(self.keywords)
             self.is_fitted = True
-            logger.info(f"Built vector index with {len(self.keywords)} keywords")
+            logger.info(f"Built vector index with {len(self.keywords)} keywords using {type(self.embedding_provider).__name__}")
             
         except Exception as e:
             logger.error(f"Error building vector index: {e}")
@@ -74,11 +71,11 @@ class FAISSVectorStore:
                 logger.warning("Index not built, building now...")
                 self.build_index()
             
-            # Vectorize the query
-            query_vector = self.vectorizer.transform([query])
+            # Vectorize the query using the embedding provider
+            query_vector = self.embedding_provider.transform([query])
             
-            # Calculate similarities
-            similarities = cosine_similarity(query_vector, self.vectors).flatten()
+            # Calculate similarities using the embedding provider
+            similarities = self.embedding_provider.get_similarity(query_vector, self.vectors)
             
             # Get top k results
             top_indices = np.argsort(similarities)[::-1][:top_k]
@@ -112,16 +109,21 @@ class FAISSVectorStore:
             
             for keyword in potential_keywords:
                 # Search for similar keywords
-                similar = self.search_similar_keywords(keyword, top_k=3, threshold=0.6)
+                similar = self.search_similar_keywords(keyword, top_k=3, threshold=0.8)
                 
                 if similar:
                     best_match = similar[0]
                     if best_match['score'] >= Config.SIMILARITY_THRESHOLD:
+                        # Get database values for this replacement
+                        database_values = self._get_database_values_for_keyword(best_match['keyword'])
+                        
                         replacement = {
                             'original_keyword': keyword,
                             'replaced_with': best_match['keyword'],
                             'confidence': best_match['score'],
-                            'metadata': best_match['metadata']
+                            'metadata': best_match['metadata'],
+                            'database_values': database_values,
+                            'type': 'keyword_replacement'
                         }
                         replacements_made.append(replacement)
                         normalized_keywords.append(best_match['keyword'])
@@ -130,13 +132,12 @@ class FAISSVectorStore:
                 else:
                     normalized_keywords.append(keyword)
             
-            # Create normalized query
+            # Create normalized query with better replacement logic
             normalized_query = query
             for replacement in replacements_made:
-                normalized_query = normalized_query.replace(
-                    replacement['original_keyword'], 
-                    replacement['replaced_with']
-                )
+                # Use word boundary replacement to avoid partial matches
+                pattern = r'\b' + re.escape(replacement['original_keyword']) + r'\b'
+                normalized_query = re.sub(pattern, replacement['replaced_with'], normalized_query, flags=re.IGNORECASE)
             
             return {
                 'original_query': query,
@@ -154,6 +155,24 @@ class FAISSVectorStore:
                 'success': False,
                 'error': str(e)
             }
+    
+    def _get_database_values_for_keyword(self, keyword: str) -> List[str]:
+        """Get all database values that match or are similar to the given keyword"""
+        try:
+            # Find all metadata entries that contain this keyword
+            matching_values = []
+            for i, meta in enumerate(self.keyword_metadata):
+                if meta.get('original_value', '').lower() == keyword.lower():
+                    matching_values.append(meta.get('original_value', ''))
+                elif keyword.lower() in meta.get('original_value', '').lower():
+                    matching_values.append(meta.get('original_value', ''))
+            
+            # Remove duplicates and return
+            return list(set(matching_values))
+            
+        except Exception as e:
+            logger.error(f"Error getting database values for keyword {keyword}: {e}")
+            return []
     
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get statistics about the vector store"""
@@ -179,9 +198,15 @@ class FAISSVectorStore:
             with open(os.path.join(path, 'metadata.pkl'), 'wb') as f:
                 pickle.dump(self.keyword_metadata, f)
             
-            # Save vectorizer
-            with open(os.path.join(path, 'vectorizer.pkl'), 'wb') as f:
-                pickle.dump(self.vectorizer, f)
+            # Save embedding provider type and configuration (not the actual object to avoid pickle issues)
+            embedding_info = {
+                'type': type(self.embedding_provider).__name__,
+                'model': getattr(self.embedding_provider, 'model', None),
+                'is_fitted': getattr(self.embedding_provider, 'is_fitted', False),
+                'embedding_dimension': getattr(self.embedding_provider, 'embedding_dimension', None)
+            }
+            with open(os.path.join(path, 'embedding_provider_info.pkl'), 'wb') as f:
+                pickle.dump(embedding_info, f)
             
             # Save vectors
             if self.vectors is not None:
@@ -201,31 +226,77 @@ class FAISSVectorStore:
                 path = Config.VECTOR_STORE_PATH
             
             if not os.path.exists(path):
-                logger.info("Vector store path does not exist, starting fresh")
+                logger.info(f"Vector store path {path} does not exist, starting fresh")
                 return
             
             # Load keywords and metadata
             keywords_path = os.path.join(path, 'keywords.pkl')
             metadata_path = os.path.join(path, 'metadata.pkl')
-            vectorizer_path = os.path.join(path, 'vectorizer.pkl')
+            embedding_provider_info_path = os.path.join(path, 'embedding_provider_info.pkl')
             vectors_path = os.path.join(path, 'vectors.pkl')
             
-            if all(os.path.exists(p) for p in [keywords_path, metadata_path, vectorizer_path, vectors_path]):
+            # Check for both old (vectorizer) and new (embedding_provider_info) formats
+            vectorizer_path = os.path.join(path, 'vectorizer.pkl')
+            old_embedding_provider_path = os.path.join(path, 'embedding_provider.pkl')
+            has_old_format = os.path.exists(vectorizer_path)
+            has_old_embedding_format = os.path.exists(old_embedding_provider_path)
+            has_new_format = os.path.exists(embedding_provider_info_path)
+            
+            if all(os.path.exists(p) for p in [keywords_path, metadata_path, vectors_path]) and (has_old_format or has_old_embedding_format or has_new_format):
                 with open(keywords_path, 'rb') as f:
                     self.keywords = pickle.load(f)
                 
                 with open(metadata_path, 'rb') as f:
                     self.keyword_metadata = pickle.load(f)
                 
-                with open(vectorizer_path, 'rb') as f:
-                    self.vectorizer = pickle.load(f)
+                # Load embedding provider based on available format
+                if has_new_format:
+                    # New format - recreate embedding provider from info
+                    with open(embedding_provider_info_path, 'rb') as f:
+                        embedding_info = pickle.load(f)
+                    
+                    # Recreate the embedding provider
+                    if embedding_info['type'] == 'TfidfEmbeddingProvider':
+                        from tools.embeddings import TfidfEmbeddingProvider
+                        self.embedding_provider = TfidfEmbeddingProvider()
+                        self.embedding_provider.is_fitted = embedding_info.get('is_fitted', False)
+                    elif embedding_info['type'] == 'OpenAIEmbeddingProvider':
+                        from tools.embeddings import OpenAIEmbeddingProvider
+                        self.embedding_provider = OpenAIEmbeddingProvider(
+                            model=embedding_info.get('model'),
+                            cache_enabled=True
+                        )
+                        self.embedding_provider.is_fitted = embedding_info.get('is_fitted', False)
+                        self.embedding_provider.embedding_dimension = embedding_info.get('embedding_dimension')
+                    else:
+                        # Fallback to default
+                        self.embedding_provider = create_embedding_provider()
+                        
+                elif has_old_embedding_format:
+                    # Try to load old embedding provider format (might fail due to pickle issues)
+                    try:
+                        with open(old_embedding_provider_path, 'rb') as f:
+                            self.embedding_provider = pickle.load(f)
+                    except Exception as e:
+                        logger.warning(f"Could not load old embedding provider format: {e}, recreating...")
+                        self.embedding_provider = create_embedding_provider()
+                        
+                elif has_old_format:
+                    # Migrate from old format - load vectorizer and create TF-IDF provider
+                    with open(vectorizer_path, 'rb') as f:
+                        old_vectorizer = pickle.load(f)
+                    # Create new TF-IDF provider and set the fitted vectorizer
+                    from tools.embeddings import TfidfEmbeddingProvider
+                    self.embedding_provider = TfidfEmbeddingProvider()
+                    self.embedding_provider.vectorizer = old_vectorizer
+                    self.embedding_provider.is_fitted = True
                 
                 with open(vectors_path, 'rb') as f:
                     self.vectors = pickle.load(f)
                 
                 self.is_fitted = True
                 
-                logger.info(f"Loaded vector store with {len(self.keywords)} keywords")
+                logger.info(f"Loaded vector store with {len(self.keywords)} keywords using {type(self.embedding_provider).__name__}")
             else:
                 logger.info("Some vector store files missing, starting fresh")
                 
@@ -240,9 +311,7 @@ class FAISSVectorStore:
         self.keyword_metadata = []
         self.vectors = None
         self.is_fitted = False
-        self.vectorizer = TfidfVectorizer(
-            max_features=10000,
-            ngram_range=(1, 3),
-            stop_words='english'
-        )
+        # Recreate the embedding provider with the same type
+        embedding_type = Config.EMBEDDING_TYPE
+        self.embedding_provider = create_embedding_provider(embedding_type)
         logger.info("Vector store reset completed")

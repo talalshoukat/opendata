@@ -45,7 +45,7 @@ def create_mock_dependencies():
     mock_llm.generate_sql_query.return_value = {
         'success': True,
         'sql_query': 'SELECT economic_activity, contributor_count FROM private_sector_contributor_distribution_by_economic_activity ORDER BY contributor_count DESC',
-        'model_used': 'gpt-4',
+        'model_used': 'gpt-3.5-turbo',
         'tokens_used': 150
     }
     mock_llm.validate_sql_query.return_value = {
@@ -55,7 +55,7 @@ def create_mock_dependencies():
     mock_llm.generate_natural_response.return_value = {
         'success': True,
         'natural_response': 'Based on the data, the technology sector has the highest number of contributors with 1,200 individuals, followed by finance with 900 contributors, and healthcare with 750 contributors.',
-        'model_used': 'gpt-4',
+        'model_used': 'gpt-3.5-turbo',
         'tokens_used': 200
     }
     mock_llm.generate_visualization_code.return_value = {

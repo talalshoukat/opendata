@@ -31,6 +31,7 @@ class AgentState(BaseModel):
     # Database and schema information
     database_schemas: Optional[Dict[str, Any]] = Field(default=None, description="Database schema information")
     normalized_query: Optional[str] = Field(default=None, description="Query with normalized keywords")
+    replacements: Optional[List[Dict[str, Any]]] = Field(default=None, description="Keyword replacements made during normalization")
     
     # SQL generation and execution
     generated_sql: Optional[str] = Field(default=None, description="Generated SQL query")
@@ -73,8 +74,15 @@ class AgentState(BaseModel):
         """Check if the workflow is complete"""
         return (
             self.final_response is not None and 
-            self.sql_execution_result is not None and
-            not self.should_continue
+            self.sql_execution_result is not None
+        )
+    
+    def is_successful(self) -> bool:
+        """Check if the workflow completed successfully without critical errors"""
+        return (
+            self.is_complete() and 
+            len(self.errors) == 0 and
+            self.retry_count < self.max_retries
         )
     
     def get_last_tool_result(self, tool_name: str) -> Optional[ToolResult]:

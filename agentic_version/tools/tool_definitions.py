@@ -21,6 +21,7 @@ class SQLGeneratorInput(BaseModel):
     user_query: str = Field(description="Natural language query")
     database_schemas: Dict[str, Any] = Field(description="Database schema information")
     normalized_query: Optional[str] = Field(default=None, description="Normalized query with corrected keywords")
+    replacements: Optional[List[Dict[str, Any]]] = Field(default=None, description="Keyword replacements made during normalization")
 
 class DBQueryInput(BaseModel):
     sql_query: str = Field(description="SQL query to execute")
@@ -57,7 +58,7 @@ class KeywordNormalizerTool(BaseTool):
                     success=True,
                     data=result,
                     metadata={
-                        'replacements_made': len(result['replacements']),
+                        'replacements_made': result['replacements'],
                         'original_query': query,
                         'normalized_query': result['normalized_query']
                     }
@@ -129,11 +130,11 @@ class SQLGeneratorTool(BaseTool):
         self._llm_manager = llm_manager
     
     def _run(self, user_query: str, database_schemas: Dict[str, Any], 
-             normalized_query: Optional[str] = None) -> ToolResult:
+             normalized_query: Optional[str] = None, replacements: Optional[List[Dict[str, Any]]] = None) -> ToolResult:
         """Generate SQL query from natural language"""
         try:
             result = self._llm_manager.generate_sql_query(
-                user_query, database_schemas, normalized_query
+                user_query, database_schemas, normalized_query, replacements
             )
             
             if result['success']:

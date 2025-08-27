@@ -54,6 +54,9 @@ class AgentPlanner:
         self.vector_store = FAISSVectorStore()
         self.llm_manager = LLMManager()
         
+        # Check if vector store needs initialization
+        self._ensure_vector_store_initialized()
+        
         # Create tools
         self.tools = create_tools(self.db_manager, self.vector_store, self.llm_manager)
         self.tool_executor = ToolExecutor(self.tools)
@@ -62,6 +65,103 @@ class AgentPlanner:
         self.workflow = self._build_workflow()
         
         logger.info("Agent planner initialized successfully")
+    
+    def _ensure_vector_store_initialized(self):
+        """Ensure vector store is initialized with data from database"""
+        try:
+            # Check if vector store has any keywords
+            stats = self.vector_store.get_collection_stats()
+            
+            if stats['total_keywords'] == 0 or not stats['is_fitted']:
+                logger.info("Vector store is empty or not fitted, initializing with database data...")
+                success = self._initialize_vector_store()
+                if success:
+                    logger.info("Vector store initialized successfully")
+                else:
+                    logger.warning("Vector store initialization failed, continuing with empty store")
+            else:
+                logger.info(f"Vector store already initialized with {stats['total_keywords']} keywords")
+                
+        except Exception as e:
+            logger.error(f"Error checking vector store initialization: {e}")
+    
+    def _initialize_vector_store(self):
+        """Initialize vector store with database data"""
+        try:
+            from config.config import Config
+            
+            logger.info("🚀 Initializing Vector Store with Database Data")
+            
+            # Get all schemas
+            logger.info("📋 Retrieving database schemas...")
+            schemas = self.db_manager.get_all_schemas()
+            logger.info(f"✅ Retrieved {len(schemas)} table schemas")
+            
+            # Add categorical values from database
+            total_keywords = 0
+            for table_name, schema in schemas.items():
+                logger.info(f"📝 Processing table: {table_name}")
+                
+                # Get actual data from the table
+                sample_data = self.db_manager.get_sample_data(table_name, limit=100)
+                
+                if not sample_data.empty:
+                    # Extract only categorical columns (exclude numeric, ID, and date columns)
+                    categorical_data = {}
+                    for column in sample_data.columns:
+                        # Skip columns that are likely not categorical
+                        if any(skip in column.lower() for skip in ['id', 'count', 'number', 'amount', 'percentage', 'ratio', 'total', 'sum', 'avg', 'min', 'max']):
+                            continue
+                        
+                        # Skip columns that are mostly numeric
+                        numeric_count = 0
+                        total_count = 0
+                        unique_values = sample_data[column].dropna().unique()
+                        
+                        for val in unique_values:
+                            total_count += 1
+                            try:
+                                float(str(val))
+                                numeric_count += 1
+                            except ValueError:
+                                pass
+                        
+                        # Only include columns that are less than 50% numeric and have reasonable number of unique values
+                        if total_count > 0 and (numeric_count / total_count) < 0.5 and len(unique_values) > 1 and len(unique_values) < 100:
+                            # Convert to strings and filter out empty values
+                            string_values = [str(val).strip() for val in unique_values if str(val).strip()]
+                            if string_values:
+                                categorical_data[column] = string_values
+                    
+                    if categorical_data:
+                        # Add to vector store
+                        self.vector_store.add_categorical_values(table_name, categorical_data)
+                        
+                        # Count keywords
+                        table_keywords = sum(len(values) for values in categorical_data.values())
+                        total_keywords += table_keywords
+                        
+                        logger.info(f"   ✅ Added {len(categorical_data)} categorical columns with {table_keywords} unique values")
+                    else:
+                        logger.info(f"   ⚠️  No categorical data extracted from {table_name}")
+                else:
+                    logger.info(f"   ⚠️  No data found in {table_name}")
+            
+            # Build index
+            logger.info("🔨 Building vector index...")
+            self.vector_store.build_index()
+            logger.info(f"✅ Built vector index with {len(self.vector_store.keywords)} keywords")
+            
+            # Save the vector store
+            logger.info(f"💾 Saving vector store to {Config.VECTOR_STORE_PATH}...")
+            self.vector_store.save_store()
+            logger.info("✅ Vector store saved successfully")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Vector store initialization failed: {e}")
+            return False
     
     def _build_workflow(self) -> StateGraph:
         """Build the LangGraph workflow"""
@@ -163,6 +263,7 @@ class AgentPlanner:
             if result.get('output', {}).get('success'):
                 data = result['output']['data']
                 state.normalized_query = data['normalized_query']
+                state.replacements = data.get('replacements', [])
                 state.add_tool_call("keyword_normalizer", state.user_query, 
                                   ToolResult(**result['output']))
                 logger.info(f"Keywords normalized: {len(data.get('replacements', []))} replacements made")
@@ -218,7 +319,8 @@ class AgentPlanner:
                 "tool_input": {
                     "user_query": state.user_query,
                     "database_schemas": state.database_schemas,
-                    "normalized_query": state.normalized_query
+                    "normalized_query": state.normalized_query,
+                    "replacements": state.replacements
                 }
             })
             

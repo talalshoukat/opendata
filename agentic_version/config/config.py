@@ -27,6 +27,14 @@ class Config:
     # Vector store configuration
     VECTOR_STORE_PATH = os.getenv('VECTOR_STORE_PATH', './vector_store')
     
+    # Embedding configuration
+    EMBEDDING_TYPE = os.getenv('EMBEDDING_TYPE', 'openai')  # 'tfidf' or 'openai'
+    OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-ada-002')
+    
+    # Embedding cache configuration
+    EMBEDDING_CACHE_ENABLED = os.getenv('EMBEDDING_CACHE_ENABLED', 'true').lower() == 'true'
+    EMBEDDING_CACHE_PATH = os.getenv('EMBEDDING_CACHE_PATH', './embedding_cache')
+    
     # Table names (from the original system)
     TABLES = [
         'private_sector_contributor_distribution_by_legal_entity',
@@ -43,7 +51,7 @@ class Config:
     MAX_TOKENS = int(os.getenv('MAX_TOKENS', '4000'))
     
     # Vector search configuration
-    SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.7'))
+    SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.8'))
     MAX_CANDIDATES = int(os.getenv('MAX_CANDIDATES', '10'))
     
     @classmethod

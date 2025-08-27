@@ -15,6 +15,49 @@ from datetime import datetime
 # Add the parent directory to Python path to import the agentic system
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Configure plotly for better colors and visibility
+import plotly.io as pio
+pio.templates.default = "plotly_white"
+
+# Define a nice color palette for visualizations
+COLOR_PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+
+
+
+def create_simple_test_chart():
+    """Create a simple test chart to verify Plotly functionality"""
+    test_data = {
+        'Category': ['A', 'B', 'C', 'D', 'E'],
+        'Value': [10, 20, 15, 25, 30],
+        'Color': ['red', 'blue', 'green', 'orange', 'purple']
+    }
+    df = pd.DataFrame(test_data)
+    
+    fig = px.bar(
+        df,
+        x='Category',
+        y='Value',
+        color='Color',
+        title='Test Chart - Plotly Functionality Verification',
+        template='plotly_white',
+        color_discrete_map={
+            'red': '#ff0000',
+            'blue': '#0000ff', 
+            'green': '#00ff00',
+            'orange': '#ffa500',
+            'purple': '#800080'
+        }
+    )
+    
+    # Add some styling
+    fig.update_layout(
+        font=dict(size=14),
+        showlegend=True,
+        height=500
+    )
+    
+    return fig
+
 # Import the agentic system components
 from config.config import Config
 from agents.agent_planner import AgentPlanner
@@ -111,11 +154,11 @@ def display_tool_results(state: AgentState):
                         st.write("**Normalized Query:**")
                         st.code(data.get('normalized_query', ''))
                     
-                    replacements = data.get('replacements', [])
-                    if replacements:
-                        st.write("**Keyword Replacements:**")
-                        for replacement in replacements:
-                            st.write(f"• {replacement['original']} → {replacement['normalized']}")
+                    # replacements = data.get('replacements', [])
+                    # if replacements:
+                    #     st.write("**Keyword Replacements:**")
+                    #     for replacement in replacements:
+                    #         st.write(f"• {replacement['original']} → {replacement['normalized']}")
                 
                 elif tool_name == "schema_inspector":
                     data = result.data
@@ -163,10 +206,46 @@ def display_tool_results(state: AgentState):
                         st.write("**Visualization Code:**")
                         st.code(viz_code, language='python')
                         
-                        # Try to execute the visualization code
+                        # Execute the original visualization code
                         try:
-                            exec(viz_code)
-                            st.success("✅ Visualization code executed successfully")
+                            # Create a local namespace for execution
+                            local_vars = {
+                                'pd': pd,
+                                'px': px,
+                                'go': go,
+                                'st': st,
+                                'plotly': __import__('plotly'),
+                                'plotly_white': 'plotly_white'
+                            }
+                            
+                            # Execute the visualization code
+                            exec(viz_code, globals(), local_vars)
+                            
+                            # Check if a figure was created and display it properly
+                            fig = None
+                            
+                            # First check if 'fig' was created directly
+                            if 'fig' in local_vars and local_vars['fig'] is not None:
+                                fig = local_vars['fig']
+                            # Then check if 'create_chart' function was created
+                            elif 'create_chart' in local_vars:
+                                # Get the data from the state
+                                if hasattr(state, 'sql_execution_result') and state.sql_execution_result is not None:
+                                    if hasattr(state.sql_execution_result, 'shape'):
+                                        df = state.sql_execution_result
+                                        if not df.empty:
+                                            # Convert DataFrame to list of dicts for the create_chart function
+                                            data_list = df.to_dict('records')
+                                            # Call the create_chart function
+                                            fig = local_vars['create_chart'](data_list)
+                            
+                            if fig is not None:
+                                # Display the chart using the standard method
+                                st.plotly_chart(fig, use_container_width=True)
+                                st.success("✅ Visualization displayed successfully!")
+                            else:
+                                st.info("ℹ️ Visualization code executed but no figure was created")
+                                
                         except Exception as viz_error:
                             st.error(f"❌ Visualization code execution failed: {viz_error}")
             else:
@@ -195,6 +274,54 @@ def display_final_results(state: AgentState):
         if state.generated_sql:
             st.write("**Generated SQL:**")
             st.code(state.generated_sql, language='sql')
+    
+    # Display visualization if available
+    if hasattr(state, 'visualization_code') and state.visualization_code:
+        st.markdown("---")
+        st.subheader("📊 Data Visualization")
+        
+        try:
+            # Create a local namespace for execution
+            local_vars = {
+                'pd': pd,
+                'px': px,
+                'go': go,
+                'st': st,
+                'plotly': __import__('plotly'),
+                'plotly_white': 'plotly_white'
+            }
+            
+            # Execute the visualization code
+            exec(state.visualization_code, globals(), local_vars)
+            
+            # Check if a figure was created and display it properly
+            fig = None
+            
+            # First check if 'fig' was created directly
+            if 'fig' in local_vars and local_vars['fig'] is not None:
+                fig = local_vars['fig']
+            # Then check if 'create_chart' function was created
+            elif 'create_chart' in local_vars:
+                # Get the data from the state
+                if hasattr(state, 'sql_execution_result') and state.sql_execution_result is not None:
+                    if hasattr(state.sql_execution_result, 'shape'):
+                        df = state.sql_execution_result
+                        if not df.empty:
+                            # Convert DataFrame to list of dicts for the create_chart function
+                            data_list = df.to_dict('records')
+                            # Call the create_chart function
+                            fig = local_vars['create_chart'](data_list)
+            
+            if fig is not None:
+                # Display the chart using the standard method
+                st.plotly_chart(fig, use_container_width=True)
+                st.success("✅ Visualization displayed successfully!")
+            else:
+                st.info("ℹ️ Visualization code executed but no figure was created")
+                
+        except Exception as e:
+            st.error(f"❌ Visualization execution failed: {e}")
+            st.code(state.visualization_code, language='python')
 
 def main():
     """Main Streamlit application"""
@@ -212,6 +339,16 @@ def main():
     if error:
         st.error(f"Failed to initialize agent: {error}")
         st.stop()
+    
+    # Add a button to test Plotly functionality
+    if st.sidebar.button("📊 Test Plotly Charts"):
+        st.sidebar.write("Testing Plotly functionality...")
+        try:
+            test_fig = create_simple_test_chart()
+            st.plotly_chart(test_fig, use_container_width=True)
+            st.sidebar.success("✅ Plotly is working correctly!")
+        except Exception as e:
+            st.sidebar.error(f"❌ Plotly test failed: {e}")
     
     # Sidebar info
     st.sidebar.info("""

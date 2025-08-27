@@ -16,20 +16,26 @@ class LLMManager:
         self.max_tokens = Config.MAX_TOKENS
     
     def generate_sql_query(self, user_query: str, database_schemas: Dict[str, Any], 
-                          normalized_query: str = None) -> Dict[str, Any]:
+                          normalized_query: str = None, replacements: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate SQL query from natural language using LLM"""
         try:
             schema_text = self._format_schema_for_llm(database_schemas)
+            
+            # Format replacement information if available
+            replacement_text = ""
+            if replacements:
+                replacement_text = self._format_values_for_llm(replacements)
+            
             # Prepare the prompt
-            # prompt = self._create_sql_generation_prompt(user_query, database_schemas, normalized_query)
             prompt = f"""
             You are a SQL expert. Generate a PostgreSQL query based on the user's request.
             
-            User Request: {normalized_query}
+            User Request: {normalized_query or user_query}
             
             Database Schema:
             {schema_text}
             
+            {replacement_text}
             
             Instructions:
             1. Generate a valid PostgreSQL query
@@ -39,7 +45,8 @@ class LLMManager:
             5. Take data from 1 table only as they are aggregated table and cant be union or joined
             6. Make sure no error in the query and not to use words like sql in query
             7. Use the relevant database values when appropriate for filtering
-            8. Return only the SQL query, no explanations
+            8. When keyword replacements are provided, use the actual database values in your WHERE clauses
+            9. Return only the SQL query, no explanations
             
             SQL Query:
             """
@@ -357,6 +364,27 @@ class LLMManager:
             schema_text += "\n"
 
         return schema_text
+
+    def _format_values_for_llm(self, relevant_values: List[Dict[str, Any]]) -> str:
+        """Format relevant categorical values for LLM consumption"""
+        if not relevant_values:
+            return ""
+        
+        values_text = "Keyword Replacements and Database Values:\n"
+        for value_info in relevant_values:
+            if value_info.get('type') == 'keyword_replacement':
+                # New format: keyword replacement information
+                values_text += f"- Keyword '{value_info['original_keyword']}' was replaced with '{value_info['replaced_with']}' (confidence: {value_info['confidence']:.3f})\n"
+                if value_info.get('database_values'):
+                    values_text += f"  Available database values: {', '.join(value_info['database_values'])}\n"
+            else:
+                # Fallback for old format or other types
+                table_name = value_info.get('table_name', 'Unknown')
+                column_name = value_info.get('column_name', 'Unknown')
+                value = value_info.get('value', 'Unknown')
+                values_text += f"- Table: {table_name}, Column: {column_name}, Value: {value}\n"
+        
+        return values_text
 
     def validate_sql_query(self, sql_query: str) -> Dict[str, Any]:
         """Basic validation of SQL query syntax"""
