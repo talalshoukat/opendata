@@ -1,6 +1,7 @@
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
+import time
 
 class ToolName(str, Enum):
     """Available tools in the system"""
@@ -9,6 +10,7 @@ class ToolName(str, Enum):
     SQL_GENERATOR = "sql_generator"
     DB_QUERY = "db_query"
     RESULT_FORMATTER = "result_formatter"
+    CHART_GENERATOR = "chart_generator"
 
 class ToolResult(BaseModel):
     """Result from a tool execution"""
@@ -16,6 +18,7 @@ class ToolResult(BaseModel):
     data: Any
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    execution_time: Optional[float] = None  # Execution time in seconds
 
 class AgentState(BaseModel):
     """State maintained throughout the agent workflow"""
@@ -49,6 +52,11 @@ class AgentState(BaseModel):
     # Workflow control
     should_continue: bool = Field(default=True, description="Whether the workflow should continue")
     next_tool: Optional[ToolName] = Field(default=None, description="Next tool to execute")
+    
+    # Timing information
+    step_timings: Dict[str, float] = Field(default_factory=dict, description="Execution times for each step")
+    total_execution_time: Optional[float] = Field(default=None, description="Total workflow execution time")
+    workflow_start_time: Optional[float] = Field(default=None, description="Workflow start timestamp")
     
     def add_tool_call(self, tool_name: str, input_data: Any, result: ToolResult):
         """Add a tool call to the history"""
@@ -92,3 +100,28 @@ class AgentState(BaseModel):
     def update_step(self, step: str):
         """Update the current step"""
         self.current_step = step
+    
+    def start_timing(self):
+        """Start timing the workflow"""
+        self.workflow_start_time = time.time()
+    
+    def end_timing(self):
+        """End timing the workflow and calculate total time"""
+        if self.workflow_start_time:
+            self.total_execution_time = time.time() - self.workflow_start_time
+    
+    def add_step_timing(self, step: str, duration: float):
+        """Add timing information for a specific step"""
+        self.step_timings[step] = duration
+    
+    def get_timing_summary(self) -> Dict[str, Any]:
+        """Get a summary of all timing information"""
+        return {
+            "total_execution_time": self.total_execution_time,
+            "step_timings": self.step_timings,
+            "tool_execution_times": {
+                call["tool"]: call["result"].execution_time 
+                for call in self.tool_calls 
+                if call["result"].execution_time is not None
+            }
+        }

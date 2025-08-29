@@ -22,18 +22,17 @@ class Config:
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable is required. Please set it in your .env file.")
     
-    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
+    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4')
     
     # Vector store configuration
     VECTOR_STORE_PATH = os.getenv('VECTOR_STORE_PATH', './vector_store')
     
-    # Embedding configuration
-    EMBEDDING_TYPE = os.getenv('EMBEDDING_TYPE', 'openai')  # 'tfidf' or 'openai'
-    OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-ada-002')
+    # Embedding configuration - Using OpenAI by default for better keyword matching
+    EMBEDDING_TYPE = os.getenv('EMBEDDING_TYPE', 'openai')  # 'tfidf', 'openai', 'sentence_transformers'
+    OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-ada-002')  # Latest model for better accuracy
     
-    # Embedding cache configuration
-    EMBEDDING_CACHE_ENABLED = os.getenv('EMBEDDING_CACHE_ENABLED', 'true').lower() == 'true'
-    EMBEDDING_CACHE_PATH = os.getenv('EMBEDDING_CACHE_PATH', './embedding_cache')
+    # Alternative embedding models
+    SENTENCE_TRANSFORMERS_MODEL = os.getenv('SENTENCE_TRANSFORMERS_MODEL', 'all-MiniLM-L6-v2')
     
     # Table names (from the original system)
     TABLES = [
@@ -48,10 +47,10 @@ class Config:
     
     # LLM configuration
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.1'))
-    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '4000'))
+    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '1000'))
     
     # Vector search configuration
-    SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.8'))
+    SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.7'))
     MAX_CANDIDATES = int(os.getenv('MAX_CANDIDATES', '10'))
     
     @classmethod

@@ -7,7 +7,7 @@ DB_PASSWORD=your_password
 
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-3.5-turbo
+OPENAI_MODEL=gpt-4
 
 # Vector Store Configuration
 VECTOR_STORE_PATH=./vector_store
@@ -34,5 +34,5 @@ TEMPERATURE=0.1
 MAX_TOKENS=4000
 
 # Vector Search Configuration
-SIMILARITY_THRESHOLD=0.7
+SIMILARITY_THRESHOLD=0.9
 MAX_CANDIDATES=10

@@ -6,7 +6,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import openai
 from config.config import Config
-from tools.embedding_cache import EmbeddingCache
+
+# Optional imports for additional embedding providers
+# try:
+#     from sentence_transformers import SentenceTransformer
+#     SENTENCE_TRANSFORMERS_AVAILABLE = True
+# except ImportError:
+#     SENTENCE_TRANSFORMERS_AVAILABLE = False
+#     logger.warning("sentence-transformers not available. Install with: pip install sentence-transformers")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,14 +97,18 @@ class TfidfEmbeddingProvider(EmbeddingProvider):
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI embedding provider using OpenAI's embedding API with caching support"""
+    """OpenAI embedding provider using OpenAI's embedding API"""
     
-    def __init__(self, model: str = None, cache_enabled: bool = None):
+    def __init__(self, model: str = None):
         self.client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
         self.model = model or Config.OPENAI_EMBEDDING_MODEL
         self.is_fitted = False
         self.embedding_dimension = None
-        self.cache = EmbeddingCache(enabled=cache_enabled)
+        
+        # Performance optimizations
+        self.batch_size = 100  # Process embeddings in batches
+        self.max_retries = 3
+        self.retry_delay = 1.0
     
     def fit(self, texts: List[str]) -> None:
         """Fit is not needed for OpenAI embeddings, but we'll validate the model"""
@@ -119,7 +130,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             raise
     
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Get embeddings from OpenAI API with caching support"""
+        """Get embeddings with batch processing and retry logic"""
         try:
             # Handle empty texts
             if not texts:
@@ -130,50 +141,47 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             if not non_empty_texts:
                 return []
             
-            # Check cache first
-            cached_embeddings = {}
-            texts_to_fetch = []
+            # Fetch embeddings from API in batches
+            logger.info(f"Fetching {len(non_empty_texts)} embeddings from OpenAI API using model: {self.model}")
+            embeddings = self._fetch_embeddings_batch(non_empty_texts)
             
-            for text in non_empty_texts:
-                cached_embedding = self.cache.get_embedding(text, self.model)
-                if cached_embedding is not None:
-                    cached_embeddings[text] = cached_embedding
-                    logger.debug(f"Using cached embedding for: {text[:50]}...")
-                else:
-                    texts_to_fetch.append(text)
-            
-            # Fetch missing embeddings from API
-            api_embeddings = []
-            if texts_to_fetch:
-                logger.info(f"Fetching {len(texts_to_fetch)} embeddings from OpenAI API")
-                response = self.client.embeddings.create(
-                    model=self.model,
-                    input=texts_to_fetch
-                )
-                
-                api_embeddings = [data.embedding for data in response.data]
-                
-                # Store new embeddings in cache
-                for text, embedding in zip(texts_to_fetch, api_embeddings):
-                    self.cache.store_embedding(text, self.model, embedding)
-                    logger.debug(f"Stored new embedding in cache for: {text[:50]}...")
-            
-            # Combine cached and new embeddings in original order
-            final_embeddings = []
-            api_index = 0
-            
-            for text in non_empty_texts:
-                if text in cached_embeddings:
-                    final_embeddings.append(cached_embeddings[text])
-                else:
-                    final_embeddings.append(api_embeddings[api_index])
-                    api_index += 1
-            
-            return final_embeddings
+            return embeddings
             
         except Exception as e:
             logger.error(f"Error getting OpenAI embeddings: {e}")
             raise
+    
+    def _fetch_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Fetch embeddings in batches with retry logic"""
+        all_embeddings = []
+        
+        # Process in batches
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i:i + self.batch_size]
+            batch_embeddings = self._fetch_single_batch(batch)
+            all_embeddings.extend(batch_embeddings)
+        
+        return all_embeddings
+    
+    def _fetch_single_batch(self, texts: List[str]) -> List[List[float]]:
+        """Fetch a single batch of embeddings with retry logic"""
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.embeddings.create(
+                    model=self.model,
+                    input=texts
+                )
+                logger.debug(f"Successfully fetched {len(texts)} embeddings using {self.model}")
+                return [data.embedding for data in response.data]
+            except Exception as e:
+                if attempt < self.max_retries - 1:
+                    logger.warning(f"Attempt {attempt + 1} failed, retrying in {self.retry_delay}s: {e}")
+                    import time
+                    time.sleep(self.retry_delay)
+                    self.retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error(f"All {self.max_retries} attempts failed for batch: {e}")
+                    raise
     
     def transform(self, texts: List[str]) -> np.ndarray:
         """Transform texts to OpenAI embeddings"""
@@ -215,13 +223,60 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         
         return model_dimensions.get(self.model, 1536)
     
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        return self.cache.get_cache_stats()
-    
-    def clear_cache(self):
-        """Clear the embedding cache"""
-        self.cache.clear_cache()
+
+
+
+# class SentenceTransformersEmbeddingProvider(EmbeddingProvider):
+#     """Sentence Transformers embedding provider for local embeddings"""
+#
+#     def __init__(self, model_name: str = None):
+#         if not SENTENCE_TRANSFORMERS_AVAILABLE:
+#             raise ImportError("sentence-transformers not available. Install with: pip install sentence-transformers")
+#
+#         self.model_name = model_name or Config.SENTENCE_TRANSFORMERS_MODEL
+#         self.model = None
+#         self.is_fitted = False
+#         self.embedding_dimension = None
+#
+#     def fit(self, texts: List[str]) -> None:
+#         """Load the sentence transformer model"""
+#         try:
+#             self.model = SentenceTransformer(self.model_name)
+#             self.embedding_dimension = self.model.get_sentence_embedding_dimension()
+#             self.is_fitted = True
+#             logger.info(f"Sentence Transformers model {self.model_name} loaded, dimension: {self.embedding_dimension}")
+#         except Exception as e:
+#             logger.error(f"Error loading Sentence Transformers model: {e}")
+#             raise
+#
+#     def transform(self, texts: List[str]) -> np.ndarray:
+#         """Transform texts to embeddings using Sentence Transformers"""
+#         try:
+#             if not self.is_fitted:
+#                 self.fit(texts)
+#
+#             embeddings = self.model.encode(texts, convert_to_numpy=True)
+#             return embeddings
+#         except Exception as e:
+#             logger.error(f"Error transforming texts with Sentence Transformers: {e}")
+#             raise
+#
+#     def get_similarity(self, query_embedding: np.ndarray, target_embeddings: np.ndarray) -> np.ndarray:
+#         """Calculate cosine similarity between query and target embeddings"""
+#         try:
+#             if query_embedding.ndim == 1:
+#                 query_embedding = query_embedding.reshape(1, -1)
+#
+#             similarities = cosine_similarity(query_embedding, target_embeddings).flatten()
+#             return similarities
+#         except Exception as e:
+#             logger.error(f"Error calculating Sentence Transformers similarity: {e}")
+#             raise
+#
+#     def get_embedding_dimension(self) -> int:
+#         """Get the dimension of Sentence Transformers embeddings"""
+#         return self.embedding_dimension or 384  # Default for all-MiniLM-L6-v2
+
 
 
 def create_embedding_provider(embedding_type: str = None) -> EmbeddingProvider:
@@ -232,5 +287,10 @@ def create_embedding_provider(embedding_type: str = None) -> EmbeddingProvider:
         return TfidfEmbeddingProvider()
     elif embedding_type.lower() == 'openai':
         return OpenAIEmbeddingProvider()
+    elif embedding_type.lower() == 'sentence_transformers':
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            logger.warning("sentence-transformers not available, falling back to OpenAI")
+            return OpenAIEmbeddingProvider()
+        return SentenceTransformersEmbeddingProvider()
     else:
-        raise ValueError(f"Unsupported embedding type: {embedding_type}. Supported types: 'tfidf', 'openai'")
+        raise ValueError(f"Unsupported embedding type: {embedding_type}. Supported types: 'tfidf', 'openai', 'sentence_transformers'")

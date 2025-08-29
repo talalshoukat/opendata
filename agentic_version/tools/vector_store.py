@@ -16,11 +16,17 @@ class FAISSVectorStore:
     
     def __init__(self, embedding_type: str = None, openai_client=None):
         self.openai_client = openai_client
+        # Use the configured embedding type if not specified
+        if embedding_type is None:
+            embedding_type = Config.EMBEDDING_TYPE
         self.embedding_provider = create_embedding_provider(embedding_type)
         self.vectors = None
         self.keywords = []
         self.keyword_metadata = []
         self.is_fitted = False
+        
+        logger.info(f"Initialized vector store with embedding type: {embedding_type}")
+        logger.info(f"Embedding provider: {type(self.embedding_provider).__name__}")
         
         # Load existing store if available
         self.load_store()
@@ -109,24 +115,39 @@ class FAISSVectorStore:
             
             for keyword in potential_keywords:
                 # Search for similar keywords
-                similar = self.search_similar_keywords(keyword, top_k=3, threshold=0.8)
+                similar = self.search_similar_keywords(keyword, top_k=5, threshold=0.7)
                 
                 if similar:
-                    best_match = similar[0]
-                    if best_match['score'] >= Config.SIMILARITY_THRESHOLD:
-                        # Get database values for this replacement
-                        database_values = self._get_database_values_for_keyword(best_match['keyword'])
+                    # Filter matches above the similarity threshold
+                    valid_matches = [match for match in similar if match['score'] >= Config.SIMILARITY_THRESHOLD]
+                    
+                    if valid_matches:
+                        
+                        # Create replacement with all valid matches for LLM to choose from
+                        all_matches = []
+                        for match in valid_matches:
+                            # Get database values for each match (now cached)
+                            database_values = self._get_database_values_for_keyword(match['keyword'])
+                            
+                            match_info = {
+                                'keyword': match['keyword'],
+                                'confidence': match['score'],
+                                'metadata': match['metadata'],
+                                'database_values': database_values
+                            }
+                            all_matches.append(match_info)
                         
                         replacement = {
                             'original_keyword': keyword,
-                            'replaced_with': best_match['keyword'],
-                            'confidence': best_match['score'],
-                            'metadata': best_match['metadata'],
-                            'database_values': database_values,
-                            'type': 'keyword_replacement'
+                            'similar_matches': all_matches,
+                            'best_match': valid_matches[0]['keyword'],  # Keep best match for backward compatibility
+                            'confidence': valid_matches[0]['score'],
+                            'type': 'keyword_replacement_with_options'
                         }
                         replacements_made.append(replacement)
-                        normalized_keywords.append(best_match['keyword'])
+                        
+                        # Use the best match for the normalized query (LLM will see all options)
+                        normalized_keywords.append(valid_matches[0]['keyword'])
                     else:
                         normalized_keywords.append(keyword)
                 else:
@@ -134,10 +155,12 @@ class FAISSVectorStore:
             
             # Create normalized query with better replacement logic
             normalized_query = query
-            for replacement in replacements_made:
-                # Use word boundary replacement to avoid partial matches
-                pattern = r'\b' + re.escape(replacement['original_keyword']) + r'\b'
-                normalized_query = re.sub(pattern, replacement['replaced_with'], normalized_query, flags=re.IGNORECASE)
+            # for replacement in replacements_made:
+            #     # Use word boundary replacement to avoid partial matches
+            #     pattern = r'\b' + re.escape(replacement['original_keyword']) + r'\b'
+            #     # Use best_match for the normalized query
+            #     replacement_keyword = replacement.get('best_match', replacement.get('replaced_with', replacement['original_keyword']))
+            #     normalized_query = re.sub(pattern, replacement_keyword, normalized_query, flags=re.IGNORECASE)
             
             return {
                 'original_query': query,
@@ -263,8 +286,7 @@ class FAISSVectorStore:
                     elif embedding_info['type'] == 'OpenAIEmbeddingProvider':
                         from tools.embeddings import OpenAIEmbeddingProvider
                         self.embedding_provider = OpenAIEmbeddingProvider(
-                            model=embedding_info.get('model'),
-                            cache_enabled=True
+                            model=embedding_info.get('model')
                         )
                         self.embedding_provider.is_fitted = embedding_info.get('is_fitted', False)
                         self.embedding_provider.embedding_dimension = embedding_info.get('embedding_dimension')
@@ -311,7 +333,7 @@ class FAISSVectorStore:
         self.keyword_metadata = []
         self.vectors = None
         self.is_fitted = False
-        # Recreate the embedding provider with the same type
+        # Recreate the embedding provider with the configured type
         embedding_type = Config.EMBEDDING_TYPE
         self.embedding_provider = create_embedding_provider(embedding_type)
-        logger.info("Vector store reset completed")
+        logger.info(f"Vector store reset completed with embedding type: {embedding_type}")

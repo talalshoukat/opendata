@@ -62,6 +62,7 @@ def create_simple_test_chart():
 from config.config import Config
 from agents.agent_planner import AgentPlanner
 from config.state import AgentState
+from tools.pdf_report_generator import create_gosi_report
 
 # Page configuration
 st.set_page_config(
@@ -143,6 +144,10 @@ def display_tool_results(state: AgentState):
             if result.success:
                 st.success(f"✅ {tool_name.title()} completed successfully")
                 
+                # Display execution time if available
+                if hasattr(result, 'execution_time') and result.execution_time:
+                    st.metric("⏱️ Execution Time", f"{result.execution_time:.2f}s")
+                
                 # Display tool-specific results
                 if tool_name == "keyword_normalizer":
                     data = result.data
@@ -168,7 +173,14 @@ def display_tool_results(state: AgentState):
                             st.write(f"**Columns:**")
                             for col in table_info.get('columns', []):
                                 nullable = "NULL" if col.get('nullable') else "NOT NULL"
-                                st.write(f"• {col['name']}: {col['type']} ({nullable})")
+                                col_info = f"• {col['name']}: {col['type']} ({nullable})"
+                                
+                                # Add sample values if available
+                                if 'sample_values' in col and col['sample_values']:
+                                    sample_str = ", ".join(col['sample_values'])
+                                    col_info += f" - Examples: {sample_str}"
+                                
+                                st.write(col_info)
                 
                 elif tool_name == "sql_generator":
                     data = result.data
@@ -271,6 +283,16 @@ def display_final_results(state: AgentState):
         st.metric("Errors", len(state.errors))
         st.metric("Retry Count", state.retry_count)
         
+        # Display execution timing information
+        if hasattr(state, 'total_execution_time') and state.total_execution_time:
+            st.write("**⏱️ Execution Times:**")
+            st.metric("Total Time", f"{state.total_execution_time:.2f}s")
+            
+            if hasattr(state, 'step_timings') and state.step_timings:
+                st.write("**Step Breakdown:**")
+                for step, duration in state.step_timings.items():
+                    st.metric(step.replace('_', ' ').title(), f"{duration:.2f}s")
+        
         if state.generated_sql:
             st.write("**Generated SQL:**")
             st.code(state.generated_sql, language='sql')
@@ -322,6 +344,51 @@ def display_final_results(state: AgentState):
         except Exception as e:
             st.error(f"❌ Visualization execution failed: {e}")
             st.code(state.visualization_code, language='python')
+    
+    # Auto-generate and download PDF Report
+    if hasattr(state, 'sql_execution_result') and state.sql_execution_result is not None:
+        st.markdown("---")
+        st.subheader("📄 PDF Report")
+        
+        try:
+            with st.spinner("Generating PDF report..."):
+                # Get the current query from session state
+                current_query = st.session_state.get('current_query', 'User Query')
+                
+                # Generate PDF report
+                pdf_path = create_gosi_report(
+                    query=current_query,
+                    sql_query=state.generated_sql or "No SQL generated",
+                    data=state.sql_execution_result,
+                    description=state.final_response or "No description available",
+                    visualization_code=state.visualization_code,
+                    fig=None  # We'll handle the figure separately
+                )
+                
+                # Read the PDF file
+                with open(pdf_path, "rb") as pdf_file:
+                    pdf_bytes = pdf_file.read()
+                
+                # Auto-download the PDF
+                st.download_button(
+                    label="📥 Download GOSI Report",
+                    data=pdf_bytes,
+                    file_name=f"GOSI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True
+                )
+                
+                st.success("✅ PDF report ready for download!")
+                
+                # Clean up temporary file
+                import os
+                if os.path.exists(pdf_path):
+                    os.remove(pdf_path)
+                    
+        except Exception as e:
+            st.error(f"❌ Error generating PDF report: {e}")
+            st.write("Please install required dependencies: `pip install reportlab kaleido`")
 
 def main():
     """Main Streamlit application"""
@@ -400,6 +467,9 @@ def main():
     # Processing section
     if process_button and user_query.strip():
         st.markdown("---")
+        
+        # Store current query in session state for PDF generation
+        st.session_state['current_query'] = user_query.strip()
         
         # Create a progress bar
         progress_bar = st.progress(0)

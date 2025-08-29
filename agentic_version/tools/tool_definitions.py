@@ -32,6 +32,11 @@ class ResultFormatterInput(BaseModel):
     query_results: Any = Field(description="Results from SQL execution")
     database_schemas: Dict[str, Any] = Field(description="Database schema information")
 
+class ChartGeneratorInput(BaseModel):
+    user_query: str = Field(description="Original user query")
+    query_results: Any = Field(description="Results from SQL execution")
+    database_schemas: Dict[str, Any] = Field(description="Database schema information")
+
 # Tool implementations
 class KeywordNormalizerTool(BaseTool):
     name: str = "keyword_normalizer"
@@ -202,7 +207,7 @@ class DBQueryTool(BaseTool):
 
 class ResultFormatterTool(BaseTool):
     name: str = "result_formatter"
-    description: str = "Generate natural language explanations and visualization code for query results"
+    description: str = "Generate natural language explanations for query results"
     args_schema: type[ResultFormatterInput] = ResultFormatterInput
     
     def __init__(self, llm_manager: LLMManager):
@@ -211,49 +216,77 @@ class ResultFormatterTool(BaseTool):
     
     def _run(self, user_query: str, sql_query: str, query_results: Any, 
              database_schemas: Dict[str, Any]) -> ToolResult:
-        """Format results into natural language and visualization"""
+        """Format results into natural language response"""
         try:
-            # Generate natural language response
+            # Generate natural language response only
             natural_response = self._llm_manager.generate_natural_response(
                 user_query, sql_query, query_results, database_schemas
             )
             
+            if natural_response['success']:
+                return ToolResult(
+                    success=True,
+                    data={
+                        'natural_response': natural_response['natural_response'],
+                        'model_used': natural_response['model_used']
+                    },
+                    metadata={
+                        'natural_response_tokens': natural_response.get('tokens_used')
+                    }
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Natural response generation failed: {natural_response.get('error')}"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in result formatting: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                error=str(e)
+            )
+
+class ChartGeneratorTool(BaseTool):
+    name: str = "chart_generator"
+    description: str = "Generate visualization code for query results"
+    args_schema: type[ChartGeneratorInput] = ChartGeneratorInput
+    
+    def __init__(self, llm_manager: LLMManager):
+        super().__init__()
+        self._llm_manager = llm_manager
+    
+    def _run(self, user_query: str, query_results: Any, 
+             database_schemas: Dict[str, Any]) -> ToolResult:
+        """Generate visualization code for the query results"""
+        try:
             # Generate visualization code
             visualization = self._llm_manager.generate_visualization_code(
                 user_query, query_results, database_schemas
             )
             
-            if natural_response['success'] and visualization['success']:
+            if visualization['success']:
                 return ToolResult(
                     success=True,
                     data={
-                        'natural_response': natural_response['natural_response'],
                         'visualization_code': visualization['visualization_code'],
-                        'model_used': natural_response['model_used']
+                        'model_used': visualization['model_used']
                     },
                     metadata={
-                        'natural_response_tokens': natural_response.get('tokens_used'),
                         'visualization_tokens': visualization.get('tokens_used')
                     }
                 )
             else:
-                errors = []
-                if not natural_response['success']:
-                    errors.append(f"Natural response generation failed: {natural_response.get('error')}")
-                if not visualization['success']:
-                    errors.append(f"Visualization generation failed: {visualization.get('error')}")
-                
                 return ToolResult(
                     success=False,
-                    data={
-                        'natural_response': natural_response.get('natural_response'),
-                        'visualization_code': visualization.get('visualization_code')
-                    },
-                    error='; '.join(errors)
+                    data=None,
+                    error=f"Visualization generation failed: {visualization.get('error')}"
                 )
                 
         except Exception as e:
-            logger.error(f"Error in result formatting: {e}")
+            logger.error(f"Error in chart generation: {e}")
             return ToolResult(
                 success=False,
                 data=None,
@@ -268,5 +301,6 @@ def create_tools(db_manager: DatabaseManager, vector_store: FAISSVectorStore,
         SchemaInspectorTool(db_manager),
         SQLGeneratorTool(llm_manager),
         DBQueryTool(db_manager),
-        ResultFormatterTool(llm_manager)
+        ResultFormatterTool(llm_manager),
+        ChartGeneratorTool(llm_manager)
     ]

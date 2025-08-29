@@ -30,9 +30,11 @@ def initialize_vector_store():
         schemas = db_manager.get_all_schemas()
         print(f"✅ Retrieved {len(schemas)} table schemas")
         
-        # Create vector store
+        # Create vector store with the same embedding type as configured
         print("🔍 Creating vector store...")
-        vector_store = FAISSVectorStore()
+        print(f"   Using embedding type: {Config.EMBEDDING_TYPE}")
+        print(f"   Using OpenAI model: {Config.OPENAI_EMBEDDING_MODEL}")
+        vector_store = FAISSVectorStore(embedding_type=Config.EMBEDDING_TYPE)
         
         # Add categorical values from database
         total_keywords = 0

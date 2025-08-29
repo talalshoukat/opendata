@@ -7,6 +7,8 @@ from tools.database_manager import DatabaseManager
 from tools.vector_store import FAISSVectorStore
 from tools.llm_manager import LLMManager
 import logging
+import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +63,10 @@ class AgentPlanner:
         self.tools = create_tools(self.db_manager, self.vector_store, self.llm_manager)
         self.tool_executor = ToolExecutor(self.tools)
         
-        # Build the workflow graph
+        # Build the workflow graphs
         self.workflow = self._build_workflow()
+        self.basic_workflow = self._build_basic_workflow()
+        self.chart_workflow = self._build_chart_workflow()
         
         logger.info("Agent planner initialized successfully")
     
@@ -174,6 +178,7 @@ class AgentPlanner:
         workflow.add_node("generate_sql", self._generate_sql_node)
         workflow.add_node("execute_query", self._execute_query_node)
         workflow.add_node("format_results", self._format_results_node)
+        workflow.add_node("generate_chart", self._generate_chart_node)
         workflow.add_node("handle_error", self._handle_error_node)
         
         # Define the workflow edges
@@ -229,6 +234,128 @@ class AgentPlanner:
             "format_results",
             self._should_continue,
             {
+                "continue": "generate_chart",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "generate_chart",
+            self._should_continue,
+            {
+                "continue": END,
+                "error": "handle_error"
+            }
+        )
+        
+        # Error handling
+        workflow.add_edge("handle_error", END)
+        
+        return workflow.compile()
+    
+    def _build_basic_workflow(self) -> StateGraph:
+        """Build the basic workflow (without chart generation)"""
+        workflow = StateGraph(AgentState)
+        
+        # Add nodes for each step (excluding chart generation)
+        workflow.add_node("start", self._start_node)
+        workflow.add_node("normalize_keywords", self._normalize_keywords_node)
+        workflow.add_node("inspect_schema", self._inspect_schema_node)
+        workflow.add_node("generate_sql", self._generate_sql_node)
+        workflow.add_node("execute_query", self._execute_query_node)
+        workflow.add_node("format_results", self._format_results_node)
+        workflow.add_node("handle_error", self._handle_error_node)
+        
+        # Define the workflow edges
+        workflow.set_entry_point("start")
+        
+        # Use conditional edges for the entire flow to handle errors
+        workflow.add_conditional_edges(
+            "start",
+            self._should_continue,
+            {
+                "continue": "normalize_keywords",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "normalize_keywords",
+            self._should_continue,
+            {
+                "continue": "inspect_schema",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "inspect_schema",
+            self._should_continue,
+            {
+                "continue": "generate_sql",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "generate_sql",
+            self._should_continue,
+            {
+                "continue": "execute_query",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "execute_query",
+            self._should_continue,
+            {
+                "continue": "format_results",
+                "error": "handle_error"
+            }
+        )
+        
+        # End after format_results (no chart generation)
+        workflow.add_conditional_edges(
+            "format_results",
+            self._should_continue,
+            {
+                "continue": END,
+                "error": "handle_error"
+            }
+        )
+        
+        # Error handling
+        workflow.add_edge("handle_error", END)
+        
+        return workflow.compile()
+    
+    def _build_chart_workflow(self) -> StateGraph:
+        """Build the chart generation workflow"""
+        workflow = StateGraph(AgentState)
+        
+        # Add nodes for chart generation only
+        workflow.add_node("start", self._start_node)
+        workflow.add_node("generate_chart", self._generate_chart_node)
+        workflow.add_node("handle_error", self._handle_error_node)
+        
+        # Define the workflow edges
+        workflow.set_entry_point("start")
+        
+        # Go directly to chart generation
+        workflow.add_conditional_edges(
+            "start",
+            self._should_continue,
+            {
+                "continue": "generate_chart",
+                "error": "handle_error"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "generate_chart",
+            self._should_continue,
+            {
                 "continue": END,
                 "error": "handle_error"
             }
@@ -242,11 +369,13 @@ class AgentPlanner:
     def _start_node(self, state: AgentState) -> AgentState:
         """Initialize the workflow"""
         state.update_step("start")
+        state.start_timing()
         logger.info(f"Starting workflow for query: {state.user_query}")
         return state
     
     def _normalize_keywords_node(self, state: AgentState) -> AgentState:
         """Normalize keywords in the user query"""
+        step_start_time = time.time()
         try:
             state.update_step("normalize_keywords")
             logger.info("Normalizing keywords...")
@@ -264,9 +393,13 @@ class AgentPlanner:
                 data = result['output']['data']
                 state.normalized_query = data['normalized_query']
                 state.replacements = data.get('replacements', [])
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
                 state.add_tool_call("keyword_normalizer", state.user_query, 
                                   ToolResult(**result['output']))
-                logger.info(f"Keywords normalized: {len(data.get('replacements', []))} replacements made")
+                state.add_step_timing("normalize_keywords", result['output']['execution_time'])
+                logger.info(f"Keywords normalized: {len(data.get('replacements', []))} replacements made in {result['output']['execution_time']:.2f}s")
             else:
                 state.add_error(f"Keyword normalization failed: {result.get('output', {}).get('error')}")
                 state.increment_retry()
@@ -280,6 +413,7 @@ class AgentPlanner:
     
     def _inspect_schema_node(self, state: AgentState) -> AgentState:
         """Inspect database schema"""
+        step_start_time = time.time()
         try:
             state.update_step("inspect_schema")
             logger.info("Inspecting database schema...")
@@ -294,8 +428,12 @@ class AgentPlanner:
             
             if result.get('output', {}).get('success'):
                 state.database_schemas = result['output']['data']
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
                 state.add_tool_call("schema_inspector", None, ToolResult(**result['output']))
-                logger.info(f"Schema inspection complete: {len(result['output']['data'])} tables")
+                state.add_step_timing("inspect_schema", result['output']['execution_time'])
+                logger.info(f"Schema inspection complete: {len(result['output']['data'])} tables in {result['output']['execution_time']:.2f}s")
             else:
                 state.add_error(f"Schema inspection failed: {result.get('output', {}).get('error')}")
                 state.increment_retry()
@@ -309,6 +447,7 @@ class AgentPlanner:
     
     def _generate_sql_node(self, state: AgentState) -> AgentState:
         """Generate SQL query from natural language"""
+        step_start_time = time.time()
         try:
             state.update_step("generate_sql")
             logger.info("Generating SQL query...")
@@ -327,8 +466,12 @@ class AgentPlanner:
             if result.get('output', {}).get('success'):
                 data = result['output']['data']
                 state.generated_sql = data['sql_query']
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
                 state.add_tool_call("sql_generator", state.user_query, ToolResult(**result['output']))
-                logger.info(f"SQL generated successfully: {data['sql_query'][:100]}...")
+                state.add_step_timing("generate_sql", result['output']['execution_time'])
+                logger.info(f"SQL generated successfully: {data['sql_query'][:100]}... in {result['output']['execution_time']:.2f}s")
             else:
                 state.add_error(f"SQL generation failed: {result.get('output', {}).get('error')}")
                 state.increment_retry()
@@ -342,6 +485,7 @@ class AgentPlanner:
     
     def _execute_query_node(self, state: AgentState) -> AgentState:
         """Execute the generated SQL query"""
+        step_start_time = time.time()
         try:
             state.update_step("execute_query")
             logger.info("Executing SQL query...")
@@ -356,8 +500,12 @@ class AgentPlanner:
             
             if result.get('output', {}).get('success'):
                 state.sql_execution_result = result['output']['data']
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
                 state.add_tool_call("db_query", state.generated_sql, ToolResult(**result['output']))
-                logger.info(f"Query executed successfully: {result['output']['metadata'].get('rows_returned', 0)} rows returned")
+                state.add_step_timing("execute_query", result['output']['execution_time'])
+                logger.info(f"Query executed successfully: {result['output']['metadata'].get('rows_returned', 0)} rows returned in {result['output']['execution_time']:.2f}s")
             else:
                 state.add_error(f"Query execution failed: {result.get('output', {}).get('error')}")
                 state.increment_retry()
@@ -370,7 +518,8 @@ class AgentPlanner:
         return state
     
     def _format_results_node(self, state: AgentState) -> AgentState:
-        """Format results into natural language and visualization"""
+        """Format results into natural language response"""
+        step_start_time = time.time()
         try:
             state.update_step("format_results")
             logger.info("Formatting results...")
@@ -389,15 +538,55 @@ class AgentPlanner:
             if result.get('output', {}).get('success'):
                 data = result['output']['data']
                 state.final_response = data['natural_response']
-                state.visualization_code = data['visualization_code']
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
                 state.add_tool_call("result_formatter", "format_results", ToolResult(**result['output']))
-                logger.info("Results formatted successfully")
+                state.add_step_timing("format_results", result['output']['execution_time'])
+                logger.info(f"Results formatted successfully in {result['output']['execution_time']:.2f}s")
             else:
                 state.add_error(f"Result formatting failed: {result.get('output', {}).get('error')}")
                 state.increment_retry()
             
         except Exception as e:
             logger.error(f"Error in result formatting: {e}")
+            state.add_error(str(e))
+            state.increment_retry()
+        
+        return state
+    
+    def _generate_chart_node(self, state: AgentState) -> AgentState:
+        """Generate visualization code for the query results"""
+        step_start_time = time.time()
+        try:
+            state.update_step("generate_chart")
+            logger.info("Generating chart...")
+            
+            # Execute chart generation
+            result = self.tool_executor.invoke({
+                "tool": "chart_generator",
+                "tool_input": {
+                    "user_query": state.user_query,
+                    "query_results": state.sql_execution_result,
+                    "database_schemas": state.database_schemas
+                }
+            })
+            
+            if result.get('output', {}).get('success'):
+                data = result['output']['data']
+                state.visualization_code = data['visualization_code']
+                
+                # Add execution time to result
+                result['output']['execution_time'] = time.time() - step_start_time
+                state.add_tool_call("chart_generator", "generate_chart", ToolResult(**result['output']))
+                state.add_step_timing("generate_chart", result['output']['execution_time'])
+                logger.info(f"Chart generated successfully in {result['output']['execution_time']:.2f}s")
+            else:
+                state.add_error(f"Chart generation failed: {result.get('output', {}).get('error')}")
+                state.increment_retry()
+            
+        except Exception as e:
+            logger.error(f"Error in chart generation: {e}")
             state.add_error(str(e))
             state.increment_retry()
         
@@ -443,10 +632,20 @@ class AgentPlanner:
                 for key, value in workflow_result.items():
                     if hasattr(final_state, key):
                         setattr(final_state, key, value)
-                logger.info("Workflow completed successfully")
+                
+                # End timing and log summary
+                final_state.end_timing()
+                timing_summary = final_state.get_timing_summary()
+                logger.info(f"Workflow completed successfully in {final_state.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
+                
                 return final_state
             else:
-                logger.info("Workflow completed successfully")
+                # End timing for non-dict results
+                workflow_result.end_timing()
+                timing_summary = workflow_result.get_timing_summary()
+                logger.info(f"Workflow completed successfully in {workflow_result.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
                 return workflow_result
             
         except Exception as e:
@@ -455,6 +654,93 @@ class AgentPlanner:
             error_state = AgentState(user_query=user_query)
             error_state.add_error(str(e))
             error_state.should_continue = False
+            error_state.end_timing()
+            return error_state
+    
+    def process_query_basic(self, user_query: str) -> AgentState:
+        """Process a user query through basic workflow (without chart generation)"""
+        try:
+            # Initialize state
+            initial_state = AgentState(user_query=user_query)
+            
+            # Execute the basic workflow (without chart generation)
+            workflow_result = self.basic_workflow.invoke(initial_state)
+            
+            # LangGraph returns a dictionary, convert it back to AgentState
+            if isinstance(workflow_result, dict):
+                final_state = AgentState(user_query=user_query)
+                # Copy all attributes from the dictionary to the state object
+                for key, value in workflow_result.items():
+                    if hasattr(final_state, key):
+                        setattr(final_state, key, value)
+                
+                # End timing and log summary
+                final_state.end_timing()
+                timing_summary = final_state.get_timing_summary()
+                logger.info(f"Basic workflow completed successfully in {final_state.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
+                
+                return final_state
+            else:
+                # End timing for non-dict results
+                workflow_result.end_timing()
+                timing_summary = workflow_result.get_timing_summary()
+                logger.info(f"Basic workflow completed successfully in {workflow_result.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
+                return workflow_result
+            
+        except Exception as e:
+            logger.error(f"Error in basic workflow execution: {e}")
+            # Return error state
+            error_state = AgentState(user_query=user_query)
+            error_state.add_error(str(e))
+            error_state.should_continue = False
+            error_state.end_timing()
+            return error_state
+    
+    def generate_chart_for_data(self, user_query: str, sql_execution_result, database_schemas) -> AgentState:
+        """Generate chart for existing data"""
+        try:
+            # Initialize state with existing data
+            initial_state = AgentState(
+                user_query=user_query,
+                sql_execution_result=sql_execution_result,
+                database_schemas=database_schemas
+            )
+            
+            # Execute only the chart generation workflow
+            workflow_result = self.chart_workflow.invoke(initial_state)
+            
+            # LangGraph returns a dictionary, convert it back to AgentState
+            if isinstance(workflow_result, dict):
+                final_state = AgentState(user_query=user_query)
+                # Copy all attributes from the dictionary to the state object
+                for key, value in workflow_result.items():
+                    if hasattr(final_state, key):
+                        setattr(final_state, key, value)
+                
+                # End timing and log summary
+                final_state.end_timing()
+                timing_summary = final_state.get_timing_summary()
+                logger.info(f"Chart generation completed successfully in {final_state.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
+                
+                return final_state
+            else:
+                # End timing for non-dict results
+                workflow_result.end_timing()
+                timing_summary = workflow_result.get_timing_summary()
+                logger.info(f"Chart generation completed successfully in {workflow_result.total_execution_time:.2f}s")
+                logger.info(f"Step timings: {timing_summary['step_timings']}")
+                return workflow_result
+            
+        except Exception as e:
+            logger.error(f"Error in chart generation: {e}")
+            # Return error state
+            error_state = AgentState(user_query=user_query)
+            error_state.add_error(str(e))
+            error_state.should_continue = False
+            error_state.end_timing()
             return error_state
     
     def close(self):

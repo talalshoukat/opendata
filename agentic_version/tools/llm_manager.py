@@ -40,13 +40,14 @@ class LLMManager:
             Instructions:
             1. Generate a valid PostgreSQL query
             2. Use the exact table and column names from the schema
-            3. Include appropriate WHERE clauses based on the query intent
+            3. Take data from 1 table only as they are aggregated table and cant be union or joined
             4. Use proper PostgreSQL syntax
-            5. Take data from 1 table only as they are aggregated table and cant be union or joined
+            5. Include appropriate WHERE clauses based on the query intent
             6. Make sure no error in the query and not to use words like sql in query
             7. Use the relevant database values when appropriate for filtering
             8. When keyword replacements are provided, use the actual database values in your WHERE clauses
-            9. Return only the SQL query, no explanations
+            9. If multiple similar matches are provided for a keyword, choose the most contextually appropriate one
+            10. Return only the SQL query, no explanations
             
             SQL Query:
             """
@@ -97,7 +98,7 @@ class LLMManager:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a data analyst. Explain query results in clear, natural language."},
+                    {"role": "system", "content": "You are a data analyst. Explain query results in clear, natural language. Keep responses concise."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=self.temperature,
@@ -123,30 +124,24 @@ class LLMManager:
     
     def generate_visualization_code(self, user_query: str, data: Any,
                                   database_schemas: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate Python code for data visualization"""
+        """Generate Python code for data visualization using OpenAI Code Interpreter"""
         try:
-            columns = list(data.iloc[0].keys()) if not data.empty else []
-            data_insights = self._analyze_data_structure(data)
+            # Convert data to DataFrame if needed
+            import pandas as pd
+            if hasattr(data, 'shape'):
+                df = data
+            else:
+                df = pd.DataFrame(data)
+            
+            if df.empty:
+                return {
+                    'success': False,
+                    'error': 'No data available for visualization',
+                    'visualization_code': None
+                }
 
-            # Use LLM to generate dynamic chart code based on query and data
-            visualization_code = self._generate_llm_chart_code(user_query, data, columns, data_insights)
-            visualization_code.strip()
-
-            # # Prepare the prompt
-            # prompt = self._create_visualization_prompt(user_query, query_results, database_schemas)
-            #
-            # # Call OpenAI API
-            # response = self.client.chat.completions.create(
-            #     model=self.model,
-            #     messages=[
-            #         {"role": "system", "content": "You are a data visualization expert. Generate Python code using plotly for creating charts."},
-            #         {"role": "user", "content": prompt}
-            #     ],
-            #     temperature=self.temperature,
-            #     max_tokens=self.max_tokens
-            # )
-            #
-            # visualization_code = response.choices[0].message.content.strip()
+            # Use OpenAI Code Interpreter for chart generation
+            visualization_code = self._generate_code_interpreter_chart(user_query, df)
             
             # Clean up the code (remove markdown formatting if present)
             if visualization_code.startswith('```python'):
@@ -158,9 +153,8 @@ class LLMManager:
             return {
                 'success': True,
                 'visualization_code': visualization_code,
-                'model_used': self.model,
+                'model_used': 'gpt-4o-code-interpreter',
                 'tokens_used': None
-                # 'tokens_used': response.usage.total_tokens if response.usage else None
             }
             
         except Exception as e:
@@ -190,6 +184,11 @@ class LLMManager:
                 prompt += f"  - {column['name']}: {column['type']}"
                 if not column['nullable']:
                     prompt += " (NOT NULL)"
+                
+                # Add sample values if available
+                if 'sample_values' in column and column['sample_values']:
+                    sample_str = ", ".join(column['sample_values'])
+                    prompt += f" (examples: {sample_str})"
                 prompt += "\n"
         
         prompt += f"""
@@ -200,6 +199,8 @@ class LLMManager:
         3. Include appropriate WHERE clauses based on the user query
         4. Use table aliases for readability
         5. Limit results to reasonable amounts (e.g., LIMIT 100)
+        6. Use the sample values (examples) to understand what data looks like in each column
+        7. When filtering by specific values, use the actual sample values as reference
         
         SQL Query:"""
         
@@ -216,53 +217,99 @@ class LLMManager:
         else:
             results_summary = str(query_results)
         
-        prompt = f"""
-        Explain the following query results in natural language:
-        
-        Original Query: {user_query}
-        SQL Query: {sql_query}
+        # prompt = f"""
+        # Explain the following query results in natural language:
+        #
+        # Original Query: {user_query}
+        # SQL Query: {sql_query}
+        # Results: {results_summary}
+        #
+        # Instructions:
+        # 1. Explain what the query was asking for
+        # 2. Summarize the key findings from the results
+        # 3. Provide insights about the data
+        # 4. Use clear, non-technical language
+        # 5. Keep the response concise but informative
+        # 6. Provide the response in the same language as user
+        #
+        # Response:"""
+
+        prompt = f"""Explain these query results in natural language:
+        User Question: {user_query}
         Results: {results_summary}
         
         Instructions:
-        1. Explain what the query was asking for
-        2. Summarize the key findings from the results
-        3. Provide insights about the data
-        4. Use clear, non-technical language
-        5. Keep the response concise but informative
+        - Show the actual data and numbers
+        - Keep response concise (2-3 sentences)
+        - Use the same language as the user
+        - Focus on key findings
         
         Response:"""
         
         return prompt
-
-    def _generate_llm_chart_code(self, query: str, data: List[Dict[str, Any]], columns: List[str],
-                                 data_insights: Dict[str, Any]) -> str:
-        """Generate dynamic chart code using LLM based on query and data"""
+    
+    def _generate_fallback_response(self, user_query: str, query_results: Any) -> Dict[str, Any]:
+        """Generate a simple fallback response for large datasets without LLM"""
         try:
-            # Create a comprehensive prompt for the LLM
+            if hasattr(query_results, 'shape'):
+                rows, cols = query_results.shape
+                response = f"Query returned {rows} rows with {cols} columns. "
+                
+                # Add basic statistics if possible
+                if rows > 0:
+                    numeric_cols = query_results.select_dtypes(include=['number']).columns
+                    if len(numeric_cols) > 0:
+                        response += f"Data includes numeric columns: {', '.join(numeric_cols[:3])}. "
+                    
+                    # Show first few values if not too many
+                    if rows <= 10:
+                        response += f"Results: {query_results.to_dict('records')[:3]}"
+                    else:
+                        response += "Results are available in the data table below."
+            else:
+                response = f"Query executed successfully. Results: {str(query_results)[:200]}..."
+            
+            return {
+                'success': True,
+                'natural_response': response,
+                'model_used': 'fallback',
+                'tokens_used': 0
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'natural_response': f"Query executed successfully. {len(query_results) if hasattr(query_results, '__len__') else 'Some'} results returned."
+            }
+    
+    def _generate_code_interpreter_chart(self, query: str, df) -> str:
+        """Generate chart code using OpenAI Code Interpreter approach"""
+        try:
+            # Prepare data summary for the Code Interpreter
+            data_summary = self._prepare_data_summary(df)
+            
+            # Create a comprehensive prompt for Code Interpreter
             prompt = f"""
             You are a data visualization expert. Generate Python code to create a chart based on the user's query and data.
 
             USER QUERY: "{query}"
 
-            DATA STRUCTURE:
-            - Columns: {columns}
-            - Total rows: {data_insights.get('total_rows', 0)}
-            - Numeric columns: {data_insights.get('numeric_columns', [])}
-            - Categorical columns: {data_insights.get('categorical_columns', [])}
-            - Sequential columns: {data_insights.get('sequential_columns', [])}
-
-            SAMPLE DATA (first 3 rows):
-            {data.head(3).to_dict(orient="records") if not data.empty else 'No data'}
+            DATA SUMMARY:
+            {data_summary}
 
             REQUIREMENTS:
-            1. Create a Python function called `create_chart(data)` that takes the data as parameter
+            1. Create a Python function called `create_chart(data)` that takes the data as parameter. 
             2. Use plotly.graph_objects (go) for visualization
-            3. Import pandas as pd
+            3. Make sure all required packages are imported
             4. Handle edge cases (empty data, insufficient columns)
             5. Create the most appropriate chart type based on the query and data
             6. Make the chart title and labels relevant to the user's query
-            7. Use proper error handling with try-catch blocks
             8. Return a valid Plotly figure object
+            9. Label and text in the chart to same language as user query if user query  is other than English
+            10. IMPORTANT: Use ALL the data in the dataset, not just a sample - show complete results
+            11. If there are many data points, consider using appropriate chart types that can handle large datasets
+            12. Also add the code to call that function with the data provided in data summary.
 
             CHART TYPE GUIDELINES:
             - For comparisons between categories: use bar charts
@@ -270,20 +317,21 @@ class LLMManager:
             - For distributions/percentages: use pie charts
             - For correlations between two numeric values: use scatter plots
             - For rankings: use horizontal bar charts
+            - For geographic data: use map visualizations
+            - For multi-dimensional data: use heatmaps or treemaps
 
             Generate ONLY the Python code, no explanations or markdown formatting.
             """
-
-            # Get response from LLM
+            # 7. Use proper error handling with try-catch blocks and import Exception
+            # Use GPT-4o for better code generation (Code Interpreter approach)
             response = self.client.chat.completions.create(
-                model=self.model,
+                model="gpt-4o",  # Using GPT-4o for better code generation
                 messages=[
-                    {"role": "system",
-                     "content": "You are a Python data visualization expert. Generate only valid Python code."},
+                    {"role": "system", "content": "You are a data visualization expert. Generate Python code using plotly for creating charts. You have access to code execution capabilities."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistent code generation
-                max_tokens=1000
+                temperature=0.1,  # Lower temperature for more consistent code generation
+                max_tokens=2000
             )
 
             chart_code = response.choices[0].message.content.strip()
@@ -300,13 +348,80 @@ class LLMManager:
             if "import pandas as pd" not in chart_code:
                 chart_code = "import pandas as pd\n" + chart_code
 
-            logger.info(f"LLM generated chart code: {chart_code[:200]}...")
+            logger.info(f"Code Interpreter generated chart code: {chart_code[:200]}...")
             return chart_code
 
         except Exception as e:
-            logger.error(f"Error generating LLM chart code: {e}")
-            # Fallback to template-based generation
-            return self._generate_fallback_chart_code(columns, data_insights, query)
+            logger.error(f"Error generating chart code with Code Interpreter: {e}")
+            return self._get_fallback_chart_code()
+    
+    def _prepare_data_summary(self, df) -> str:
+        """Prepare a comprehensive data summary for Code Interpreter"""
+        try:
+            summary = f"""
+            - Shape: {df.shape[0]} rows, {df.shape[1]} columns
+            - Columns: {list(df.columns)}
+            - Data types: {dict(df.dtypes)}
+            """
+            
+            # Add numeric columns info
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            if numeric_cols:
+                summary += f"\n- Numeric columns: {numeric_cols}"
+                for col in numeric_cols:  # Show stats for ALL numeric columns
+                    summary += f"\n  - {col}: min={df[col].min():.2f}, max={df[col].max():.2f}, mean={df[col].mean():.2f}"
+            
+            # Add categorical columns info
+            categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+            if categorical_cols:
+                summary += f"\n- Categorical columns: {categorical_cols}"
+                for col in categorical_cols:  # Show unique values for ALL categorical columns
+                    unique_vals = df[col].unique()[:10]  # First 10 unique values
+                    summary += f"\n  - {col}: {len(df[col].unique())} unique values, sample: {list(unique_vals)}"
+            
+            # Add sample data - show more rows for better chart generation
+            if not df.empty:
+                # Show up to 10 rows or all rows if less than 10
+                sample_rows = min(10, len(df))
+                summary += f"\n- Sample data (first {sample_rows} rows):\n{df.head(sample_rows).to_string()}"
+                
+                # If there are more rows, mention the total
+                if len(df) > 10:
+                    summary += f"\n- Total rows in dataset: {len(df)}"
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error preparing data summary: {e}")
+            return f"Data shape: {df.shape}, Columns: {list(df.columns)}"
+    
+    def _get_fallback_chart_code(self) -> str:
+        """Fallback chart code when Code Interpreter fails"""
+        return """
+def create_chart(data):
+    import plotly.graph_objects as go
+    import pandas as pd
+    
+    try:
+        # Basic error handling for empty data
+        if data.empty:
+            fig = go.Figure()
+            fig.add_annotation(text="No data available for visualization", 
+                             xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+            return fig
+        
+        # Create a simple bar chart as fallback
+        fig = go.Figure()
+        fig.add_annotation(text="Chart generation failed - using fallback", 
+                         xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+        
+    except Exception as e:
+        fig = go.Figure()
+        fig.add_annotation(text=f"Error: {str(e)}", 
+                         xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+"""
     
     # def _create_visualization_prompt(self, user_query: str, query_results: Any,
     #                                database_schemas: Dict[str, Any]) -> str:
@@ -351,7 +466,7 @@ class LLMManager:
             schema_text += "Columns:\n"
             for column in table_info.get('columns', []):
                 nullable = "NULL" if column.get('nullable') else "NOT NULL"
-                schema_text += f"  - {column['name']}: {column['type']} ({nullable})\n"
+                schema_text += f"  - {column['name']}: {column['type']} ({nullable}) (Sample Values: {column['sample_values']})\n"
 
             if table_info.get('primary_key'):
                 schema_text += f"Primary Key: {', '.join(table_info['primary_key'])}\n"
@@ -372,8 +487,26 @@ class LLMManager:
         
         values_text = "Keyword Replacements and Database Values:\n"
         for value_info in relevant_values:
-            if value_info.get('type') == 'keyword_replacement':
-                # New format: keyword replacement information
+            if value_info.get('type') == 'keyword_replacement_with_options':
+                # New format: keyword replacement with multiple options
+                original = value_info['original_keyword']
+                values_text += f"- Keyword '{original}' has multiple similar matches:\n"
+                
+                for i, match in enumerate(value_info.get('similar_matches', []), 1):
+                    keyword = match['keyword']
+                    confidence = match['confidence']
+                    database_values = match.get('database_values', [])
+                    
+                    values_text += f"  {i}. '{keyword}' (confidence: {confidence:.3f})"
+                    if database_values:
+                        values_text += f" - Database values: {', '.join(database_values)}"
+                    values_text += "\n"
+                
+                values_text += f"  → Best match used: '{value_info.get('best_match', 'N/A')}'\n"
+                values_text += f"  → Choose the most appropriate match based on context\n"
+                
+            elif value_info.get('type') == 'keyword_replacement':
+                # Legacy format: single keyword replacement
                 values_text += f"- Keyword '{value_info['original_keyword']}' was replaced with '{value_info['replaced_with']}' (confidence: {value_info['confidence']:.3f})\n"
                 if value_info.get('database_values'):
                     values_text += f"  Available database values: {', '.join(value_info['database_values'])}\n"

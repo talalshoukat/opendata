@@ -46,7 +46,7 @@ class DatabaseManager:
             raise
     
     def get_table_schema(self, table_name: str) -> Dict[str, Any]:
-        """Get schema information for a specific table"""
+        """Get schema information for a specific table with sample values"""
         try:
             inspector = inspect(self.engine)
             columns = inspector.get_columns(table_name)
@@ -59,13 +59,30 @@ class DatabaseManager:
                 'indexes': inspector.get_indexes(table_name)
             }
             
+            # Get sample data to show example values for each column
+            sample_data = self.get_sample_data(table_name, limit=10)
+            
             for column in columns:
-                schema_info['columns'].append({
-                    'name': column['name'],
+                column_name = column['name']
+                column_info = {
+                    'name': column_name,
                     'type': str(column['type']),
                     'nullable': column['nullable'],
                     'default': column['default']
-                })
+                }
+                
+                # Add sample values if we have sample data
+                if not sample_data.empty and column_name in sample_data.columns:
+                    # Get top 3 non-null unique values for this column
+                    sample_values = sample_data[column_name].dropna().unique()[:3]
+                    if len(sample_values) > 0:
+                        column_info['sample_values'] = [str(val) for val in sample_values]
+                    else:
+                        column_info['sample_values'] = []
+                else:
+                    column_info['sample_values'] = []
+                
+                schema_info['columns'].append(column_info)
             
             return schema_info
         except Exception as e:
@@ -116,7 +133,7 @@ class DatabaseManager:
     def get_sample_data(self, table_name: str, limit: int = 5) -> pd.DataFrame:
         """Get sample data from a table for context"""
         try:
-            query = f'SELECT * FROM "{table_name}" LIMIT {limit}'
+            query = f'SELECT * FROM "{table_name}"'
             return pd.read_sql_query(query, self.engine)
         except Exception as e:
             logger.error(f"Error getting sample data from {table_name}: {e}")
