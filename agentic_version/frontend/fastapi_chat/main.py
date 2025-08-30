@@ -18,6 +18,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import uvicorn
 import shutil
+
+# Add the parent directory to the path to import our modules
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from tools.llm_manager import LLMManager
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -41,6 +45,9 @@ templates = Jinja2Templates(directory="templates")
 
 # Global agent instance
 agent: Optional[AgentPlanner] = None
+
+# Global LLM manager for general questions
+llm_manager: Optional[LLMManager] = None
 
 # Simple in-memory storage for query results
 query_storage: Dict[str, Any] = {}
@@ -90,6 +97,16 @@ def initialize_agent():
         return True
     except Exception as e:
         print(f"Failed to initialize agent: {e}")
+        return False
+
+def initialize_llm_manager():
+    """Initialize the LLM manager for general questions"""
+    global llm_manager
+    try:
+        llm_manager = LLMManager()
+        return True
+    except Exception as e:
+        print(f"Failed to initialize LLM manager: {e}")
         return False
 
 def execute_visualization_code(viz_code: str, data: pd.DataFrame) -> Dict:
@@ -376,12 +393,17 @@ def create_fallback_figure(data: pd.DataFrame) -> go.Figure:
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the agent on startup"""
+    """Initialize the agent and LLM manager on startup"""
     print("🚀 Starting AI Chat Assistant...")
     if not initialize_agent():
         print("❌ Failed to initialize agent")
     else:
         print("✅ Agent initialized successfully")
+    
+    if not initialize_llm_manager():
+        print("❌ Failed to initialize LLM manager")
+    else:
+        print("✅ LLM manager initialized successfully")
 
 @app.get("/", response_class=HTMLResponse)
 async def chat_page(request: Request):
@@ -391,17 +413,58 @@ async def chat_page(request: Request):
 @app.post("/api/chat", response_model=ChatResponse)
 async def process_chat_message(chat_request: ChatRequest):
     """Process a chat message and return the AI response"""
-    global agent, query_storage
+    global agent, query_storage, llm_manager
     
     if not agent:
         raise HTTPException(status_code=500, detail="Agent not initialized")
+    
+    if not llm_manager:
+        raise HTTPException(status_code=500, detail="LLM manager not initialized")
     
     if not chat_request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
     try:
+        user_query = chat_request.message.strip()
+        
+        # Check if this is a general question or data-related query
+        is_data_related = llm_manager.is_data_related_query(user_query)
+        
+        if not is_data_related:
+            # Handle as general conversation
+            print(f"🤖 Processing general question: {user_query}")
+            general_response = llm_manager.handle_general_question(user_query)
+            
+            if general_response['success']:
+                return ChatResponse(
+                    success=True,
+                    message=general_response['response'],
+                    has_chart=False,
+                    has_report=False,
+                    has_data=False,
+                    data=None,
+                    columns=None,
+                    row_count=None,
+                    column_count=None,
+                    query_id=None
+                )
+            else:
+                return ChatResponse(
+                    success=False,
+                    message="I'm sorry, I'm having trouble processing your question right now. Please try again.",
+                    has_chart=False,
+                    has_report=False,
+                    has_data=False,
+                    data=None,
+                    columns=None,
+                    row_count=None,
+                    column_count=None,
+                    query_id=None
+                )
+        
         # Process the query using basic workflow (without chart generation)
-        result_state = agent.process_query_basic(chat_request.message.strip())
+        print(f"📊 Processing data-related query: {user_query}")
+        result_state = agent.process_query_basic(user_query)
         
         # Get the natural language response
         response = result_state.final_response or "I processed your query but couldn't generate a response."
@@ -623,12 +686,9 @@ async def generate_report(query_id: str):
 async def get_example_queries():
     """Get example queries for the chat interface"""
     examples = [
-        "Show me data from Riyadh Office",
-        "What are the top legal entity types by contributor count?",
-        "How many contributors are there in the technology sector?",
-        "Show the breakdown of contributors by occupation group",
-        "Which cities have the highest number of private entities?",
-        "Compare construction and commerce sectors across cities"
+        "Compare private vs stock contributors in Riyadh for whole year of 2018?",
+        "Compare construction and commerce sectors across top three cities?",
+        "compare contributor in manufacturing and community service sector in 2018 in riyadh for each quarter?"
     ]
     return {"examples": examples}
 

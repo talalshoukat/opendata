@@ -519,6 +519,122 @@ def create_chart(data):
         
         return values_text
 
+    def handle_general_question(self, user_query: str) -> Dict[str, Any]:
+        """Handle general questions not related to data analysis using OpenAI"""
+        try:
+            # Create a prompt for general conversation
+            prompt = f"""
+            You are a helpful AI assistant. Your name is "GOSI Open Data Bot". The user has asked a general question that is not related to data analysis or database queries.
+            
+            User Question: {user_query}
+            
+            Instructions:
+            1. Provide a helpful, friendly response to the user's question
+            2. Keep the response conversational and natural
+            3. If the question is about your capabilities, mention that you can help with data analysis and visualization
+            4. If the question is unrelated to data, answer it directly and helpfully
+            5. Keep responses concise but informative
+            6. Use the same language as the user's question
+            7. Be polite and professional
+            
+            Response:"""
+            
+            # Call OpenAI API
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful AI assistant. Answer questions naturally and helpfully."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,  # Slightly higher temperature for more natural conversation
+                max_tokens=self.max_tokens
+            )
+            
+            general_response = response.choices[0].message.content.strip()
+            
+            return {
+                'success': True,
+                'response': general_response,
+                'model_used': self.model,
+                'tokens_used': response.usage.total_tokens if response.usage else None,
+                'is_general_question': True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling general question: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'response': "I'm sorry, I'm having trouble processing your question right now. Please try again.",
+                'is_general_question': True
+            }
+    
+    def is_data_related_query(self, user_query: str) -> bool:
+        """Determine if a query is data-related or general conversation using AI"""
+        try:
+            # Use OpenAI to intelligently classify the query
+            prompt = f"""
+            You are an AI classifier that determines if a user query is related to data analysis/database queries or is a general conversation question.
+            
+            User Query: "{user_query}"
+            
+            Instructions:
+            1. Analyze the user's query to determine its intent
+            2. DATA-RELATED queries include:
+               - Questions about data, databases, tables, statistics
+               - Requests for charts, graphs, visualizations, reports
+               - Queries about specific data fields, sectors, contributors, entities
+               - Requests to show, display, compare, count, analyze data
+               - Questions about specific cities, years, quarters, companies, sectors
+               - Any request that would require querying a database or analyzing data
+            
+            3. GENERAL CONVERSATION queries include:
+               - Greetings (hello, hi, how are you, etc.)
+               - Questions about the AI's capabilities or identity
+               - General knowledge questions not related to data
+               - Casual conversation, thanks, goodbyes
+               - Questions about weather, current events, general topics
+               - Any question that doesn't require data analysis
+            
+            4. Consider the language - this works for any language (Arabic, English, French, etc.)
+            5. Be context-aware and understand the user's intent
+            6. If uncertain, lean towards DATA-RELATED for business queries
+            
+            Respond with ONLY one word:
+            - "DATA" if the query is data-related
+            - "GENERAL" if the query is general conversation
+            
+            Classification:"""
+            
+            # Call OpenAI API for classification
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert at classifying user queries. Respond with only 'DATA' or 'GENERAL'."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,  # Low temperature for consistent classification
+                max_tokens=10
+            )
+            
+            classification = response.choices[0].message.content.strip().upper()
+            
+            # Parse the response
+            is_data_related = "DATA" in classification
+            
+            logger.info(f"Query classification: '{user_query}' -> {classification} (data_related: {is_data_related})")
+            
+            return is_data_related
+            
+        except Exception as e:
+            logger.error(f"Error classifying query with AI: {e}")
+            # Fallback: simple heuristic for safety
+            query_lower = user_query.lower()
+            if any(word in query_lower for word in ['hello', 'hi', 'how are you', 'thank you', 'bye', 'goodbye']):
+                return False
+            # Default to data-related for ambiguous cases
+            return True
+
     def validate_sql_query(self, sql_query: str) -> Dict[str, Any]:
         """Basic validation of SQL query syntax"""
         try:
