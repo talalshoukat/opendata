@@ -32,7 +32,15 @@ class LLMManager:
             
             User Request: {normalized_query or user_query}
             
-            Database Schema:
+            Database Schema 
+            (Each table is pre-aggregated at the Quarter level. 
+            ⚠️ Do NOT use aggregation functions like SUM, COUNT, or AVG. 
+            ⚠️ Do NOT join across tables or across quarters. 
+            The data is grouped by city, year, and quarter.  
+            Since multiple quarters exist for the same city/year, avoid duplicates by always selecting the most recent available quarter when the user does not specify one.  
+            If a specific year is requested without a quarter, return results for the latest quarter of that year.  
+            Simply filter the pre-aggregated values — do not re-aggregate them.)
+
             {schema_text}
             
             {replacement_text}
@@ -64,7 +72,8 @@ class LLMManager:
             )
             
             sql_query = response.choices[0].message.content.strip()
-            
+            logger.info(f"SQL Query: {sql_query}")
+
             # Clean up the SQL query (remove markdown formatting if present)
             if sql_query.startswith('```sql'):
                 sql_query = sql_query[7:]
