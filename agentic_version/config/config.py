@@ -38,7 +38,11 @@ class Config:
     TABLES = [
         'private_sector_contributor_distribution_by_legal_entity',
         'private_sector_contributor_distribution_by_economic_activity',
-        'private_sector_contributor_distribution_by_occupation_group'
+        'private_sector_contributor_distribution_by_occupation_group',
+        'annuity_benefit',
+        'establishments_by_region',
+        'contributors_by_nationality',
+        'total_beneficiaries'
     ]
     
     # Agent configuration

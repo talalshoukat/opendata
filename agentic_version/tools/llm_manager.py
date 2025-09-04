@@ -2,6 +2,7 @@ import openai
 from typing import Dict, List, Any, Optional
 import logging
 from config.config import Config
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -135,8 +136,6 @@ class LLMManager:
                                   database_schemas: Dict[str, Any]) -> Dict[str, Any]:
         """Generate Python code for data visualization using OpenAI Code Interpreter"""
         try:
-            # Convert data to DataFrame if needed
-            import pandas as pd
             if hasattr(data, 'shape'):
                 df = data
             else:
@@ -660,9 +659,7 @@ def create_chart(data):
 
             # Check for proper table references
             if 'from' in sql_lower and not any(
-                    table in sql_lower for table in ['private_sector_contributor_distribution_by_legal_entity',
-                                                     'private_sector_contributor_distribution_by_economic_activity',
-                                                     'private_sector_contributor_distribution_by_occupation_group']):
+                    table in sql_lower for table in Config.TABLES):
                 return False
 
             return True

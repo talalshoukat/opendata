@@ -6,8 +6,8 @@ from tools.tool_definitions import create_tools
 from tools.database_manager import DatabaseManager
 from tools.vector_store import FAISSVectorStore
 from tools.llm_manager import LLMManager
+from config.config import Config
 import logging
-import os
 import time
 
 logger = logging.getLogger(__name__)
@@ -92,8 +92,6 @@ class AgentPlanner:
     def _initialize_vector_store(self):
         """Initialize vector store with database data"""
         try:
-            from config.config import Config
-            
             logger.info("🚀 Initializing Vector Store with Database Data")
             
             # Get all schemas

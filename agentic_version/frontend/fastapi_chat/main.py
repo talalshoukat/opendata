@@ -6,25 +6,28 @@ A web-based chat interface using FastAPI and Jinja2 templates
 
 import sys
 import os
-import json
-import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from collections import OrderedDict
 
-from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import uvicorn
 import shutil
+import hashlib
+import base64
 
 # Add the parent directory to the path to import our modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from tools.llm_manager import LLMManager
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+from tools.enhanced_pdf_report_generator import create_enhanced_gosi_report
 
 # Add the parent directory to Python path to import the agentic system
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -32,7 +35,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # Import the agentic system components
 from config.config import Config
 from agents.agent_planner import AgentPlanner
-from config.state import AgentState
 
 # Initialize FastAPI app
 app = FastAPI(title="AI Chat Assistant", description="Chat interface for Agentic AI System")
@@ -49,15 +51,41 @@ agent: Optional[AgentPlanner] = None
 # Global LLM manager for general questions
 llm_manager: Optional[LLMManager] = None
 
-# Simple in-memory storage for query results
-query_storage: Dict[str, Any] = {}
+# LRU Cache for query storage with max 200 entries
+MAX_QUERY_CACHE_SIZE = 2
+query_storage: OrderedDict[str, Any] = OrderedDict()
 
-class ChatMessage(BaseModel):
-    role: str  # 'user' or 'assistant'
-    content: str
-    timestamp: str
-    chart_data: Optional[List[Dict]] = None
-    viz_code: Optional[str] = None
+
+def add_to_query_storage(query_id: str, data: Dict[str, Any]):
+    """Add data to query storage with LRU eviction policy"""
+    # global query_storage
+
+    # If key already exists, move it to end (most recently used)
+    if query_id in query_storage:
+        query_storage.move_to_end(query_id)
+        query_storage[query_id] = data
+    else:
+        # Add new entry
+        query_storage[query_id] = data
+
+        # If we exceed the limit, remove the least recently used item
+        if len(query_storage) > MAX_QUERY_CACHE_SIZE:
+            oldest_key = next(iter(query_storage))
+            del query_storage[oldest_key]
+            print(f"🗑️ Evicted oldest query from cache: {oldest_key}")
+
+    print(f"📊 Query storage now has {len(query_storage)} entries (max: {MAX_QUERY_CACHE_SIZE})")
+
+
+def get_from_query_storage(query_id: str) -> Optional[Dict[str, Any]]:
+    """Get data from query storage and mark as recently used"""
+    # global query_storage
+
+    if query_id in query_storage:
+        # Move to end to mark as recently used
+        query_storage.move_to_end(query_id)
+        return query_storage[query_id]
+    return None
 
 class ChatRequest(BaseModel):
     message: str
@@ -152,9 +180,6 @@ def execute_visualization_code(viz_code: str, data: pd.DataFrame) -> Dict:
         # Convert figure to proper JSON format
         fig_dict = fig.to_dict()
         
-        # Convert numpy arrays to lists for JSON serialization
-        import numpy as np
-        
         def convert_numpy(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
@@ -166,8 +191,6 @@ def execute_visualization_code(viz_code: str, data: pd.DataFrame) -> Dict:
                 # Check if it's a binary buffer format
                 if 'bdata' in obj and 'dtype' in obj:
                     try:
-                        # Convert binary buffer back to numpy array then to list
-                        import base64
                         bdata = base64.b64decode(obj['bdata'])
                         dtype = obj['dtype']
                         arr = np.frombuffer(bdata, dtype=dtype)
@@ -213,9 +236,6 @@ def execute_visualization_code(viz_code: str, data: pd.DataFrame) -> Dict:
         fig = create_fallback_figure(data)
         fig_dict = fig.to_dict()
         
-        # Convert numpy arrays to lists
-        import numpy as np
-        
         def convert_numpy(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
@@ -227,8 +247,6 @@ def execute_visualization_code(viz_code: str, data: pd.DataFrame) -> Dict:
                 # Check if it's a binary buffer format
                 if 'bdata' in obj and 'dtype' in obj:
                     try:
-                        # Convert binary buffer back to numpy array then to list
-                        import base64
                         bdata = base64.b64decode(obj['bdata'])
                         dtype = obj['dtype']
                         arr = np.frombuffer(bdata, dtype=dtype)
@@ -259,7 +277,6 @@ def preprocess_visualization_code(viz_code: str) -> str:
     processed_lines = []
     
     for line in lines:
-        # Skip import statements since we provide the modules
         if line.strip().startswith(('import ', 'from ')):
             print(f"Skipping import line: {line.strip()}")
             continue
@@ -413,7 +430,7 @@ async def chat_page(request: Request):
 @app.post("/api/chat", response_model=ChatResponse)
 async def process_chat_message(chat_request: ChatRequest):
     """Process a chat message and return the AI response"""
-    global agent, query_storage, llm_manager
+    global agent, llm_manager
     
     if not agent:
         raise HTTPException(status_code=500, detail="Agent not initialized")
@@ -468,9 +485,7 @@ async def process_chat_message(chat_request: ChatRequest):
         
         # Get the natural language response
         response = result_state.final_response or "I processed your query but couldn't generate a response."
-        
-        # Generate a unique query ID
-        import hashlib
+
         message_hash = hashlib.md5(chat_request.message.strip().encode()).hexdigest()[:8]
         query_id = f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{message_hash}"
         print(f"🆔 Generated query_id: {query_id}")
@@ -497,13 +512,13 @@ async def process_chat_message(chat_request: ChatRequest):
         
         # Store the result state for later use (always store if we have data)
         if has_data:
-            query_storage[query_id] = {
+            storage_data= {
                 'result_state': result_state,
                 'original_query': chat_request.message.strip(),
                 'timestamp': datetime.now().isoformat()
             }
+            add_to_query_storage(query_id, storage_data)
             print(f"✅ Stored query in storage with ID: {query_id}")
-            print(f"📊 Query storage now has {len(query_storage)} entries")
         else:
             print(f"⚠️ No data available, not storing query: {query_id}")
         
@@ -543,18 +558,13 @@ async def health_check():
 @app.post("/api/chart/{query_id}", response_model=ChartResponse)
 async def generate_chart(query_id: str):
     """Generate chart for a specific query"""
-    global query_storage
     
-    print(f"🔍 Looking for query_id: {query_id}")
-    print(f"📊 Available query IDs in storage: {list(query_storage.keys())}")
-    print(f"📊 Total entries in storage: {len(query_storage)}")
-    
-    if query_id not in query_storage:
+    stored_data = get_from_query_storage(query_id)
+    if not stored_data:
         print(f"❌ Query ID {query_id} not found in storage")
         raise HTTPException(status_code=404, detail=f"Query not found. Available queries: {list(query_storage.keys())}")
     
     try:
-        stored_data = query_storage[query_id]
         result_state = stored_data['result_state']
         original_query = stored_data['original_query']
         
@@ -629,13 +639,12 @@ async def generate_chart(query_id: str):
 @app.post("/api/report/{query_id}")
 async def generate_report(query_id: str):
     """Generate PDF report for a specific query and return the file"""
-    global query_storage
     
-    if query_id not in query_storage:
+    stored_data = get_from_query_storage(query_id)
+    if not stored_data:
         raise HTTPException(status_code=404, detail="Query not found")
     
     try:
-        stored_data = query_storage[query_id]
         result_state = stored_data['result_state']
         original_query = stored_data['original_query']
         
@@ -643,17 +652,13 @@ async def generate_report(query_id: str):
             result_state.sql_execution_result is not None and
             not result_state.sql_execution_result.empty):
             
-            # Import the PDF report generator
-            from tools.pdf_report_generator import create_gosi_report
-            
-            # Generate PDF report
-            pdf_path = create_gosi_report(
+            # Generate enhanced PDF report (without technical details)
+            pdf_path = create_enhanced_gosi_report(
                 query=original_query,
-                sql_query=result_state.generated_sql or "No SQL generated",
                 data=result_state.sql_execution_result,
                 description=result_state.final_response or "No description available",
-                visualization_code=result_state.visualization_code,
-                fig=None
+                fig=None,
+                language='auto'  # Auto-detect language from query
             )
             
             # Create reports directory if it doesn't exist

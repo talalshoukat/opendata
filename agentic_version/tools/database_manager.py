@@ -6,7 +6,7 @@ import pandas as pd
 from typing import Dict, List, Tuple, Any, Optional
 import logging
 from config.config import Config
-
+from sqlparse import parse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,19 @@ class DatabaseManager:
         try:
             inspector = inspect(self.engine)
             columns = inspector.get_columns(table_name)
-            
+            table_descriptions = {
+                'contributors_by_nationality': 'This table provides a breakdown of contributors by their nationality. Use this when user ask for contributor related information where city is not requested.',
+                'private_sector_contributor_distribution_by_legal_entity': 'This table provides a breakdown of contributors by the legal entity use this only when user ask for legal entity wise distribution.',
+                'private_sector_contributor_distribution_by_economic_activity': 'This table provides a breakdown of contributors by economic activities. Use this only when user ask for economic activities wise distribution.',
+                'private_sector_contributor_distribution_by_occupation_group': 'This table provides a breakdown of contributors by occupation. Use this only when user ask for occupation related queries.',
+                'annuity_benefit': 'This table contains data on social insurance annuity benefits.',
+                'establishments_by_region': 'This table tracks the number of establishments/ companies per region.',
+                'total_beneficiaries': 'This table lists the total number of beneficiaries. Benefit include (SANED- Operation Hezard and Annuity)'
+            }
+
             schema_info = {
                 'table_name': table_name,
+                'table_descriptions': table_descriptions[table_name],
                 'columns': [],
                 'primary_key': inspector.get_pk_constraint(table_name).get('constrained_columns', []),
                 'foreign_keys': inspector.get_foreign_keys(table_name),
@@ -95,32 +105,7 @@ class DatabaseManager:
         for table in Config.TABLES:
             schemas[table] = self.get_table_schema(table)
         return schemas
-    
-    def get_categorical_values(self, table_name: str, limit: int = 1000) -> Dict[str, List[str]]:
-        """Extract categorical values from a table"""
-        try:
-            schema = self.get_table_schema(table_name)
-            categorical_values = {}
-            
-            for column in schema['columns']:
-                column_name = column['name']
-                # Get unique values for each column (limited to avoid memory issues)
-                query = f"""
-                SELECT DISTINCT "{column_name}" 
-                FROM "{table_name}" 
-                WHERE "{column_name}" IS NOT NULL 
-                LIMIT {limit}
-                """
-                
-                df = pd.read_sql_query(query, self.engine)
-                if not df.empty:
-                    categorical_values[column_name] = df[column_name].astype(str).tolist()
-            
-            return categorical_values
-        except Exception as e:
-            logger.error(f"Error extracting categorical values from {table_name}: {e}")
-            return {}
-    
+
     def execute_query(self, query: str) -> pd.DataFrame:
         """Execute a SQL query and return results as DataFrame"""
         try:
@@ -142,8 +127,6 @@ class DatabaseManager:
     def validate_sql_query(self, query: str) -> Tuple[bool, str]:
         """Validate SQL query syntax without executing"""
         try:
-            # Try to parse the query
-            from sqlparse import parse
             parsed = parse(query)
             return True, "Query syntax is valid"
         except Exception as e:
