@@ -7,6 +7,9 @@ import os
 import re
 from config.config import Config
 from tools.embeddings import create_embedding_provider, EmbeddingProvider
+# Create new TF-IDF provider and set the fitted vectorizer
+from tools.embeddings import TfidfEmbeddingProvider
+from tools.embeddings import OpenAIEmbeddingProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -280,11 +283,9 @@ class FAISSVectorStore:
                     
                     # Recreate the embedding provider
                     if embedding_info['type'] == 'TfidfEmbeddingProvider':
-                        from tools.embeddings import TfidfEmbeddingProvider
                         self.embedding_provider = TfidfEmbeddingProvider()
                         self.embedding_provider.is_fitted = embedding_info.get('is_fitted', False)
                     elif embedding_info['type'] == 'OpenAIEmbeddingProvider':
-                        from tools.embeddings import OpenAIEmbeddingProvider
                         self.embedding_provider = OpenAIEmbeddingProvider(
                             model=embedding_info.get('model')
                         )
@@ -307,8 +308,7 @@ class FAISSVectorStore:
                     # Migrate from old format - load vectorizer and create TF-IDF provider
                     with open(vectorizer_path, 'rb') as f:
                         old_vectorizer = pickle.load(f)
-                    # Create new TF-IDF provider and set the fitted vectorizer
-                    from tools.embeddings import TfidfEmbeddingProvider
+
                     self.embedding_provider = TfidfEmbeddingProvider()
                     self.embedding_provider.vectorizer = old_vectorizer
                     self.embedding_provider.is_fitted = True

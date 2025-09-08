@@ -656,7 +656,7 @@ class AgentPlanner:
             return error_state
     
     def process_query_basic(self, user_query: str) -> AgentState:
-        """Process a user query through basic workflow (without chart generation)"""
+        """Process a query using the basic workflow (without chart generation)"""
         try:
             # Initialize state
             initial_state = AgentState(user_query=user_query)

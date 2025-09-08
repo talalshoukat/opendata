@@ -37,8 +37,9 @@ class LLMManager:
             (Each table is pre-aggregated at the Quarter level. 
             ⚠️ Do NOT use aggregation functions like SUM, COUNT, or AVG. 
             ⚠️ Do NOT join across tables or across quarters. 
-            The data is grouped by city, year, and quarter.  
-            Since multiple quarters exist for the same city/year, avoid duplicates by always selecting the most recent available quarter when the user does not specify one.  
+            ⚠️ Do NOT use LIMIT in the query. 
+            The data is grouped.  
+            Since multiple quarters exist for the same dimension, avoid duplicates by always selecting the most recent available quarter when the user does not specify one.  
             If a specific year is requested without a quarter, return results for the latest quarter of that year.  
             Simply filter the pre-aggregated values — do not re-aggregate them.)
 
@@ -57,6 +58,7 @@ class LLMManager:
             8. When keyword replacements are provided, use the actual database values in your WHERE clauses
             9. If multiple similar matches are provided for a keyword, choose the most contextually appropriate one
             10. Return only the SQL query, no explanations
+            11. Never use limit results until user explicitly ask to.
             
             SQL Query:
             """
@@ -248,9 +250,10 @@ class LLMManager:
         
         Instructions:
         - Show the actual data and numbers
-        - Keep response concise (2-3 sentences)
+        - Explain what the query was asking for
+        - Keep the response concise but informative
         - Use the same language as the user
-        - Focus on key findings
+        - Focus on key findings and not telling us anything about dataframe rows or columns
         
         Response:"""
         
@@ -292,14 +295,14 @@ class LLMManager:
             }
     
     def _generate_code_interpreter_chart(self, query: str, df) -> str:
-        """Generate chart code using OpenAI Code Interpreter approach"""
+        """Generate chart code using OpenAI Code Interpreter approach with GOSI theme"""
         try:
             # Prepare data summary for the Code Interpreter
             data_summary = self._prepare_data_summary(df)
             
-            # Create a comprehensive prompt for Code Interpreter
+            # Create a comprehensive prompt for Code Interpreter with GOSI theme
             prompt = f"""
-            You are a data visualization expert. Generate Python code to create a chart based on the user's query and data.
+            You are a data visualization expert. Generate Python code to create a chart based on the user's query and data with GOSI branding and theme.
 
             USER QUERY: "{query}"
 
@@ -313,11 +316,30 @@ class LLMManager:
             4. Handle edge cases (empty data, insufficient columns)
             5. Create the most appropriate chart type based on the query and data
             6. Make the chart title and labels relevant to the user's query
-            8. Return a valid Plotly figure object
-            9. Label and text in the chart to same language as user query if user query  is other than English
-            10. IMPORTANT: Use ALL the data in the dataset, not just a sample - show complete results
-            11. If there are many data points, consider using appropriate chart types that can handle large datasets
-            12. Also add the code to call that function with the data provided in data summary.
+            7. Return a valid Plotly figure object
+            8. Label and text in the chart to same language as user query if user query is other than English
+            9. IMPORTANT: Use ALL the data in the dataset, not just a sample - show complete results
+            10. If there are many data points, consider using appropriate chart types that can handle large datasets
+            11. Also add the code to call that function with the data provided in data summary.
+            12. Don't add fig.show() in the code
+
+            GOSI THEME REQUIREMENTS:
+            13. Use GOSI brand colors:
+                - Primary: '#00004C' (GOSI Dark Blue)
+                - Secondary: '#00C100' (GOSI Green)
+                - Use these colors for chart elements, bars, lines, etc.
+            14. Add GOSI logo to the chart:
+                - Logo file: 'static/logo/GOSILogo.png'
+                - Position it in the botton and extreme right after plot.
+                - And legend on rights
+                - Make it small and unobtrusive
+                - image layout should be at x=1.4, y=-0.3,
+                - also add fig.update_layout with margin at (r=150, b=100)  
+
+            15. Apply GOSI styling:
+                - Use professional, clean design
+                - Ensure good contrast and readability
+                - Use GOSI colors consistently throughout the chart
 
             CHART TYPE GUIDELINES:
             - For comparisons between categories: use bar charts
@@ -330,16 +352,16 @@ class LLMManager:
 
             Generate ONLY the Python code, no explanations or markdown formatting.
             """
-            # 7. Use proper error handling with try-catch blocks and import Exception
+            #        - Logo should be just below the header text
             # Use GPT-4o for better code generation (Code Interpreter approach)
             response = self.client.chat.completions.create(
                 model="gpt-4o",  # Using GPT-4o for better code generation
                 messages=[
-                    {"role": "system", "content": "You are a data visualization expert. Generate Python code using plotly for creating charts. You have access to code execution capabilities."},
+                    {"role": "system", "content": "You are a data visualization expert. Generate Python code using plotly for creating charts with GOSI branding. You have access to code execution capabilities."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,  # Lower temperature for more consistent code generation
-                max_tokens=2000
+                max_tokens=2500
             )
 
             chart_code = response.choices[0].message.content.strip()
@@ -356,7 +378,7 @@ class LLMManager:
             if "import pandas as pd" not in chart_code:
                 chart_code = "import pandas as pd\n" + chart_code
 
-            logger.info(f"Code Interpreter generated chart code: {chart_code[:200]}...")
+            logger.info(f"Code Interpreter generated GOSI-themed chart code: {chart_code[:200]}...")
             return chart_code
 
         except Exception as e:
@@ -384,17 +406,17 @@ class LLMManager:
             if categorical_cols:
                 summary += f"\n- Categorical columns: {categorical_cols}"
                 for col in categorical_cols:  # Show unique values for ALL categorical columns
-                    unique_vals = df[col].unique()[:10]  # First 10 unique values
+                    unique_vals = df[col].unique()[:100]  # First 100 unique values
                     summary += f"\n  - {col}: {len(df[col].unique())} unique values, sample: {list(unique_vals)}"
             
             # Add sample data - show more rows for better chart generation
             if not df.empty:
                 # Show up to 10 rows or all rows if less than 10
-                sample_rows = min(10, len(df))
+                sample_rows = min(100, len(df))
                 summary += f"\n- Sample data (first {sample_rows} rows):\n{df.head(sample_rows).to_string()}"
                 
                 # If there are more rows, mention the total
-                if len(df) > 10:
+                if len(df) > 100:
                     summary += f"\n- Total rows in dataset: {len(df)}"
             
             return summary
@@ -471,6 +493,7 @@ def create_chart(data):
         schema_text = ""
         for table_name, table_info in database_schema.items():
             schema_text += f"\nTable: {table_name}\n"
+            schema_text += f"\nTable Description: {table_info.get('table_descriptions'), ''}\n"
             schema_text += "Columns:\n"
             for column in table_info.get('columns', []):
                 nullable = "NULL" if column.get('nullable') else "NOT NULL"
@@ -659,7 +682,14 @@ def create_chart(data):
 
             # Check for proper table references
             if 'from' in sql_lower and not any(
-                    table in sql_lower for table in Config.TABLES):
+                    table in sql_lower for table in [
+                        'private_sector_contributor_distribution_by_legal_entity',
+                                                     'private_sector_contributor_distribution_by_economic_activity',
+                                                     'private_sector_contributor_distribution_by_occupation_group',
+                                                     'annuity_benefit',
+                                                     'establishments_by_region',
+                                                     'contributors_by_nationality',
+                                                     'total_beneficiaries']):
                 return False
 
             return True

@@ -6,7 +6,7 @@ import pandas as pd
 from typing import Dict, List, Tuple, Any, Optional
 import logging
 from config.config import Config
-from sqlparse import parse
+# from sqlparse import parse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -123,14 +123,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting sample data from {table_name}: {e}")
             return pd.DataFrame()
-    
-    def validate_sql_query(self, query: str) -> Tuple[bool, str]:
-        """Validate SQL query syntax without executing"""
-        try:
-            parsed = parse(query)
-            return True, "Query syntax is valid"
-        except Exception as e:
-            return False, f"Query syntax error: {str(e)}"
+
     
     def get_table_row_count(self, table_name: str) -> int:
         """Get the number of rows in a table"""
