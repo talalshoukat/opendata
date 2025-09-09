@@ -79,17 +79,15 @@ class EnhancedGOSIReportGenerator:
     def register_arabic_fonts(self):
         """Register Arabic fonts for proper Arabic text rendering"""
         try:
-            # First, try to register Naskh Arabic font (better for shaped text)
-            naskh_font_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', 'NotoNaskhArabic-Regular.ttf')
-
-            if os.path.exists(naskh_font_path):
+            # Try to register SF Arabic font (macOS) - best option for Arabic
+            sf_arabic_path = '/System/Library/Fonts/SFArabic.ttf'
+            if os.path.exists(sf_arabic_path):
                 try:
-                    # Register the Naskh font
-                    pdfmetrics.registerFont(TTFont('ArabicFont', naskh_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', naskh_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', naskh_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', naskh_font_path))
-
+                    pdfmetrics.registerFont(TTFont('ArabicFont', sf_arabic_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', sf_arabic_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', sf_arabic_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', sf_arabic_path))
+                    
                     # Register the font family
                     pdfmetrics.registerFontFamily(
                         'ArabicFont',
@@ -98,33 +96,42 @@ class EnhancedGOSIReportGenerator:
                         italic='ArabicFont-Italic',
                         boldItalic='ArabicFont-BoldItalic'
                     )
-
-                    logger.info(f"Successfully registered Naskh Arabic font family: {naskh_font_path}")
+                    logger.info(f"Successfully registered SF Arabic font family: {sf_arabic_path}")
                     return
                 except Exception as e:
-                    logger.warning(f"Failed to register Naskh font: {e}")
+                    logger.warning(f"Failed to register SF Arabic font: {e}")
 
-            # Fallback to Sans Arabic font
+            # Try to register Arial Unicode MS (macOS) - supports Arabic
+            arial_path = '/System/Library/Fonts/ArialHB.ttc'
+            if os.path.exists(arial_path):
+                try:
+                    pdfmetrics.registerFont(TTFont('ArabicFont', arial_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', arial_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', arial_path))
+                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', arial_path))
+                    
+                    # Register the font family
+                    pdfmetrics.registerFontFamily(
+                        'ArabicFont',
+                        normal='ArabicFont',
+                        bold='ArabicFont-Bold',
+                        italic='ArabicFont-Italic',
+                        boldItalic='ArabicFont-BoldItalic'
+                    )
+                    logger.info(f"Successfully registered Arial font family: {arial_path}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to register Arial font: {e}")
+
+            # Try to register bundled Noto fonts if available
             bundled_font_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', 'NotoSansArabic-Regular.ttf')
-
             if os.path.exists(bundled_font_path):
                 try:
-                    # Register the regular font
                     pdfmetrics.registerFont(TTFont('ArabicFont', bundled_font_path))
-
-                    # Try to register bold font if available
-                    bold_font_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', 'NotoSansArabic-Bold.ttf')
-                    if os.path.exists(bold_font_path):
-                        pdfmetrics.registerFont(TTFont('ArabicFont-Bold', bold_font_path))
-                        logger.info("Registered Arabic Bold font")
-                    else:
-                        # Fallback to regular font for bold
-                        pdfmetrics.registerFont(TTFont('ArabicFont-Bold', bundled_font_path))
-
-                    # Use regular font for italic variants (since we don't have italic Arabic fonts)
+                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', bundled_font_path))
                     pdfmetrics.registerFont(TTFont('ArabicFont-Italic', bundled_font_path))
                     pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', bundled_font_path))
-
+                    
                     # Register the font family
                     pdfmetrics.registerFontFamily(
                         'ArabicFont',
@@ -143,7 +150,6 @@ class EnhancedGOSIReportGenerator:
             arabic_fonts = [
                 # Common Arabic fonts on different systems
                 '/System/Library/Fonts/Arial Unicode MS.ttf',  # macOS
-                '/System/Library/Fonts/Helvetica.ttc',  # macOS
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # Linux
                 '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',  # Linux
                 'C:\\Windows\\Fonts\\arial.ttf',  # Windows
@@ -193,44 +199,88 @@ class EnhancedGOSIReportGenerator:
             logger.error(f"Error creating Arabic fallback: {e}")
 
     def _shape_arabic_text(self, text: str) -> str:
-        """Shape Arabic text for proper rendering with connected characters"""
+        """Shape Arabic text for proper rendering with connected characters, preserving English text"""
         if not ARABIC_SHAPING_AVAILABLE:
+            logger.warning("Arabic text shaping libraries not available")
             return text
 
+        try:
+            # Split text into Arabic and non-Arabic parts
+            processed_parts = []
+            current_part = ""
+            is_arabic_part = False
+            
+            for char in text:
+                # Check if character is Arabic
+                is_arabic = '\u0600' <= char <= '\u06FF' or '\u0750' <= char <= '\u077F' or \
+                           '\u08A0' <= char <= '\u08FF' or '\uFB50' <= char <= '\uFDFF' or \
+                           '\uFE70' <= char <= '\uFEFF'
+                
+                if is_arabic != is_arabic_part:
+                    # Part type changed, process the current part
+                    if current_part:
+                        if is_arabic_part:
+                            # Process Arabic part
+                            processed_parts.append(self._process_arabic_part(current_part))
+                        else:
+                            # Keep non-Arabic part as is
+                            processed_parts.append(current_part)
+                    
+                    # Start new part
+                    current_part = char
+                    is_arabic_part = is_arabic
+                else:
+                    # Same type, add to current part
+                    current_part += char
+            
+            # Process the last part
+            if current_part:
+                if is_arabic_part:
+                    processed_parts.append(self._process_arabic_part(current_part))
+                else:
+                    processed_parts.append(current_part)
+            
+            # Join all parts
+            result = ''.join(processed_parts)
+            logger.debug(f"Mixed text processed: '{text}' -> '{result}'")
+            return result
+
+        except Exception as e:
+            logger.warning(f"Error in mixed text processing: {e}")
+            return text
+
+    def _process_arabic_part(self, arabic_text: str) -> str:
+        """Process only the Arabic part of the text"""
         try:
             # Try different approaches for better Arabic text rendering
             # Method 1: Reshape + Bidi (most comprehensive)
             try:
-                reshaped_text = arabic_reshaper.reshape(text)
+                reshaped_text = arabic_reshaper.reshape(arabic_text)
                 shaped_text = get_display(reshaped_text)
-                logger.info(f"Arabic text shaped (reshape+bidi): '{text}' -> '{shaped_text}'")
                 return shaped_text
             except Exception as e1:
-                logger.warning(f"Reshape+bidi failed: {e1}")
+                logger.warning(f"Reshape+bidi failed for Arabic part: {e1}")
 
             # Method 2: Just Bidi (simpler, sometimes works better with ReportLab)
             try:
-                bidi_text = get_display(text)
-                logger.info(f"Arabic text shaped (bidi only): '{text}' -> '{bidi_text}'")
+                bidi_text = get_display(arabic_text)
                 return bidi_text
             except Exception as e2:
-                logger.warning(f"Bidi only failed: {e2}")
+                logger.warning(f"Bidi only failed for Arabic part: {e2}")
 
             # Method 3: Just reshaping (fallback)
             try:
-                reshaped_only = arabic_reshaper.reshape(text)
-                logger.info(f"Arabic text shaped (reshape only): '{text}' -> '{reshaped_only}'")
+                reshaped_only = arabic_reshaper.reshape(arabic_text)
                 return reshaped_only
             except Exception as e3:
-                logger.warning(f"Reshape only failed: {e3}")
+                logger.warning(f"Reshape only failed for Arabic part: {e3}")
 
-            # If all methods fail, return original text
-            logger.warning("All Arabic text shaping methods failed, returning original text")
-            return text
+            # If all methods fail, return original Arabic text
+            return arabic_text
 
         except Exception as e:
-            logger.warning(f"Error in Arabic text shaping: {e}")
-            return text
+            logger.warning(f"Error processing Arabic part: {e}")
+            return arabic_text
 
     def _transliterate_arabic(self, text: str) -> str:
         """Simple Arabic to Latin transliteration for fallback"""
@@ -332,15 +382,23 @@ class EnhancedGOSIReportGenerator:
         return text
 
     def _process_arabic_text(self, text: str, language: str) -> str:
-        """Process Arabic text for proper rendering"""
-        if language == 'ar':
+        """Process Arabic text for proper rendering, preserving English text and numbers"""
+        # Only process if it's explicitly Arabic language AND contains Arabic characters
+        if language == 'ar' and self._contains_arabic_text(text):
             if not self._is_arabic_font_available():
                 # If Arabic font is not available, use transliteration
                 return self._transliterate_arabic(text)
             else:
                 # If Arabic font is available, shape the text for proper rendering
                 return self._shape_arabic_text(text)
-        return text
+        else:
+            # English, other language, or Arabic language without Arabic characters - return as is
+            return text
+
+    def _contains_arabic_text(self, text: str) -> bool:
+        """Check if text contains Arabic characters"""
+        arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+        return bool(arabic_pattern.search(text))
 
     def _is_arabic_font_available(self) -> bool:
         """Check if Arabic font is available"""
@@ -354,21 +412,21 @@ class EnhancedGOSIReportGenerator:
         """Create custom paragraph styles for GOSI theme with language support"""
         styles = getSampleStyleSheet()
 
-        # Determine font based on language
+        # Always use Helvetica for English text to avoid font issues
+        font_name = 'Helvetica'
+        alignment = TA_LEFT
+        
+        # Only use Arabic font for pure Arabic content
         if language == 'ar':
-            # Try to use registered Arabic font, fallback to Helvetica
             try:
                 # Check if ArabicFont is registered
                 if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
                     font_name = 'ArabicFont'  # Use the family name, not individual variants
                 else:
-                    font_name = 'Helvetica'
+                    font_name = 'Helvetica'  # Fallback to Helvetica
             except:
                 font_name = 'Helvetica'
             alignment = TA_RIGHT
-        else:
-            font_name = 'Helvetica'
-            alignment = TA_LEFT
 
         # Title style
         title_style = ParagraphStyle(
@@ -460,7 +518,7 @@ class EnhancedGOSIReportGenerator:
                 logger.warning(f"Could not add logo to header: {e}")
 
         # Header title - moved higher up
-        # Use appropriate font for language
+        # Always use Helvetica for English text, Arabic font only for Arabic content
         if language == 'ar':
             try:
                 if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
@@ -491,7 +549,7 @@ class EnhancedGOSIReportGenerator:
         )
 
         # Footer
-        # Use appropriate font for language
+        # Always use Helvetica for English text, Arabic font only for Arabic content
         if language == 'ar':
             try:
                 if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
@@ -532,14 +590,21 @@ class EnhancedGOSIReportGenerator:
             # Convert to base64 string
             img_base64 = base64.b64encode(img_bytes).decode()
 
-            # Create temporary file
-            temp_path = f"plots/plotly_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            # Create temporary file with proper directory structure
             cwd = os.getcwd()
-            report_dir = os.path.join(cwd, "reports", temp_path)
-            with open(report_dir, 'wb') as f:
+            reports_dir = os.path.join(cwd, "reports")
+            plots_dir = os.path.join(reports_dir, "plots")
+            
+            # Create directories if they don't exist
+            os.makedirs(plots_dir, exist_ok=True)
+            
+            temp_path = f"plotly_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            full_path = os.path.join(plots_dir, temp_path)
+            
+            with open(full_path, 'wb') as f:
                 f.write(base64.b64decode(img_base64))
 
-            return report_dir
+            return full_path
         except Exception as e:
             logger.error(f"Error converting plotly figure to image: {e}")
             return None
@@ -562,19 +627,25 @@ class EnhancedGOSIReportGenerator:
         # Create table
         table = Table(table_data, repeatRows=1)
 
-        # Determine appropriate font for language
-        if language == 'ar':
+        # Always use Helvetica for English text, Arabic font only for Arabic content
+        header_font = 'Helvetica-Bold'
+        data_font = 'Helvetica'
+        
+        # Only use Arabic font if language is Arabic AND content contains Arabic text
+        # Check if table content contains Arabic text
+        table_content = ' '.join(display_df.columns.tolist() + [str(cell) for _, row in display_df.iterrows() for cell in row.values])
+        has_arabic_content = self._contains_arabic_text(table_content)
+        
+        if language == 'ar' and has_arabic_content:
             try:
                 if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
                     header_font = 'ArabicFont'  # Use family name
                     data_font = 'ArabicFont'  # Use family name
-                else:
-                    header_font = 'Helvetica-Bold'
-                    data_font = 'Helvetica'
             except:
-                header_font = 'Helvetica-Bold'
-                data_font = 'Helvetica'
+                # Keep Helvetica as fallback
+                pass
         else:
+            # Force Helvetica for English content or when no Arabic text detected
             header_font = 'Helvetica-Bold'
             data_font = 'Helvetica'
 

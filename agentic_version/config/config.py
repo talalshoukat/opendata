@@ -22,7 +22,7 @@ class Config:
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable is required. Please set it in your .env file.")
     
-    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4')
+    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o')
     
     # Vector store configuration
     VECTOR_STORE_PATH = os.getenv('VECTOR_STORE_PATH', './vector_store')

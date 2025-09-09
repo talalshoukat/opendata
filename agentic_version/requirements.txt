@@ -34,3 +34,7 @@ python-dotenv>=1.0.0
 seaborn>=0.13.0
 
 requests>=2.31.0
+
+# Arabic text support for PDF generation
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
