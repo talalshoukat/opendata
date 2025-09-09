@@ -533,11 +533,13 @@ class EnhancedGOSIReportGenerator:
             img_base64 = base64.b64encode(img_bytes).decode()
 
             # Create temporary file
-            temp_path = f"/tmp/plotly_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(temp_path, 'wb') as f:
+            temp_path = f"plots/plotly_chart_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            cwd = os.getcwd()
+            report_dir = os.path.join(cwd, "reports", temp_path)
+            with open(report_dir, 'wb') as f:
                 f.write(base64.b64decode(img_base64))
 
-            return temp_path
+            return report_dir
         except Exception as e:
             logger.error(f"Error converting plotly figure to image: {e}")
             return None
@@ -703,7 +705,7 @@ class EnhancedGOSIReportGenerator:
                     story.append(Spacer(1, 0.1 * inch))
 
                     # Clean up temporary file
-                    os.remove(img_path)
+                    # os.remove(img_path)
                 except Exception as e:
                     logger.error(f"Error adding image to PDF: {e}")
                     story.append(Paragraph("Visualization could not be included in PDF", styles['body']))

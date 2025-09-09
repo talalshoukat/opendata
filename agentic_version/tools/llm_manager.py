@@ -110,7 +110,7 @@ class LLMManager:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a data analyst. Explain query results in clear, natural language. Keep responses concise."},
+                    {"role": "system", "content": "You are a data analyst. Explain query results in clear, natural language. Keep responses concise and in user language."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=self.temperature,
@@ -252,7 +252,7 @@ class LLMManager:
         - Show the actual data and numbers
         - Explain what the query was asking for
         - Keep the response concise but informative
-        - Use the same language as the user
+        - Give response in the same language as user asked question in.
         - Focus on key findings and not telling us anything about dataframe rows or columns
         
         Response:"""

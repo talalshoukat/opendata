@@ -607,6 +607,18 @@ async def generate_chart(query_id: str):
                 print(f"Plot layout type: {type(plot_layout)}")
                 print(f"Plot config type: {type(plot_config)}")
                 
+                # Create a Plotly figure object from the plot data for PDF report
+                plot_figure = None
+                if plot_data and plot_layout:
+                    try:
+                        plot_figure = go.Figure(data=plot_data, layout=plot_layout)
+                        if plot_config:
+                            plot_figure.update_layout(**plot_config)
+                        print(f"Created Plotly figure object for PDF report: {type(plot_figure)}")
+                    except Exception as e:
+                        print(f"Error creating Plotly figure object: {e}")
+                        plot_figure = None
+                
                 if plot_data:
                     print(f"First trace in plot_data: {plot_data[0] if plot_data else 'No data'}")
                 
@@ -652,12 +664,37 @@ async def generate_report(query_id: str):
             result_state.sql_execution_result is not None and
             not result_state.sql_execution_result.empty):
             
+            # Generate plot figure for the report if visualization code is available
+
+            result_state = agent.generate_chart_for_data(
+                original_query,
+                result_state.sql_execution_result,
+                result_state.database_schemas
+            )
+            if (hasattr(result_state, 'visualization_code') and 
+                result_state.visualization_code):
+                try:
+                    print(f"Generating plot figure for PDF report...")
+                    plot_result = execute_visualization_code(result_state.visualization_code, result_state.sql_execution_result)
+                    plot_data = plot_result.get('data')
+                    plot_layout = plot_result.get('layout')
+                    plot_config = plot_result.get('config')
+                    
+                    if plot_data and plot_layout:
+                        plot_figure = go.Figure(data=plot_data, layout=plot_layout)
+                        if plot_config:
+                            plot_figure.update_layout(**plot_config)
+                        print(f"Created Plotly figure object for PDF report: {type(plot_figure)}")
+                except Exception as e:
+                    print(f"Error creating plot figure for PDF report: {e}")
+                    plot_figure = None
+            
             # Generate enhanced PDF report (without technical details)
             pdf_path = create_enhanced_gosi_report(
                 query=original_query,
                 data=result_state.sql_execution_result,
                 description=result_state.final_response or "No description available",
-                fig=None,
+                fig=plot_figure,  # Pass the generated plot figure
                 language='auto'  # Auto-detect language from query
             )
             
