@@ -199,88 +199,22 @@ class EnhancedGOSIReportGenerator:
             logger.error(f"Error creating Arabic fallback: {e}")
 
     def _shape_arabic_text(self, text: str) -> str:
-        """Shape Arabic text for proper rendering with connected characters, preserving English text"""
+        """Shape Arabic text for proper rendering with connected characters"""
         if not ARABIC_SHAPING_AVAILABLE:
             logger.warning("Arabic text shaping libraries not available")
             return text
 
         try:
-            # Split text into Arabic and non-Arabic parts
-            processed_parts = []
-            current_part = ""
-            is_arabic_part = False
-            
-            for char in text:
-                # Check if character is Arabic
-                is_arabic = '\u0600' <= char <= '\u06FF' or '\u0750' <= char <= '\u077F' or \
-                           '\u08A0' <= char <= '\u08FF' or '\uFB50' <= char <= '\uFDFF' or \
-                           '\uFE70' <= char <= '\uFEFF'
-                
-                if is_arabic != is_arabic_part:
-                    # Part type changed, process the current part
-                    if current_part:
-                        if is_arabic_part:
-                            # Process Arabic part
-                            processed_parts.append(self._process_arabic_part(current_part))
-                        else:
-                            # Keep non-Arabic part as is
-                            processed_parts.append(current_part)
-                    
-                    # Start new part
-                    current_part = char
-                    is_arabic_part = is_arabic
-                else:
-                    # Same type, add to current part
-                    current_part += char
-            
-            # Process the last part
-            if current_part:
-                if is_arabic_part:
-                    processed_parts.append(self._process_arabic_part(current_part))
-                else:
-                    processed_parts.append(current_part)
-            
-            # Join all parts
-            result = ''.join(processed_parts)
-            logger.debug(f"Mixed text processed: '{text}' -> '{result}'")
-            return result
+            # Simple approach - just reshape and apply bidi
+            reshaped_text = arabic_reshaper.reshape(text)
+            shaped_text = get_display(reshaped_text)
+            logger.debug(f"Arabic text shaped: '{text}' -> '{shaped_text}'")
+            return shaped_text
 
         except Exception as e:
-            logger.warning(f"Error in mixed text processing: {e}")
+            logger.warning(f"Error in Arabic text shaping: {e}")
             return text
 
-    def _process_arabic_part(self, arabic_text: str) -> str:
-        """Process only the Arabic part of the text"""
-        try:
-            # Try different approaches for better Arabic text rendering
-            # Method 1: Reshape + Bidi (most comprehensive)
-            try:
-                reshaped_text = arabic_reshaper.reshape(arabic_text)
-                shaped_text = get_display(reshaped_text)
-                return shaped_text
-            except Exception as e1:
-                logger.warning(f"Reshape+bidi failed for Arabic part: {e1}")
-
-            # Method 2: Just Bidi (simpler, sometimes works better with ReportLab)
-            try:
-                bidi_text = get_display(arabic_text)
-                return bidi_text
-            except Exception as e2:
-                logger.warning(f"Bidi only failed for Arabic part: {e2}")
-
-            # Method 3: Just reshaping (fallback)
-            try:
-                reshaped_only = arabic_reshaper.reshape(arabic_text)
-                return reshaped_only
-            except Exception as e3:
-                logger.warning(f"Reshape only failed for Arabic part: {e3}")
-
-            # If all methods fail, return original Arabic text
-            return arabic_text
-
-        except Exception as e:
-            logger.warning(f"Error processing Arabic part: {e}")
-            return arabic_text
 
     def _transliterate_arabic(self, text: str) -> str:
         """Simple Arabic to Latin transliteration for fallback"""
@@ -382,17 +316,79 @@ class EnhancedGOSIReportGenerator:
         return text
 
     def _process_arabic_text(self, text: str, language: str) -> str:
-        """Process Arabic text for proper rendering, preserving English text and numbers"""
+        """Process Arabic text for proper rendering, preserving symbols, digits, and dates"""
         # Only process if it's explicitly Arabic language AND contains Arabic characters
         if language == 'ar' and self._contains_arabic_text(text):
             if not self._is_arabic_font_available():
                 # If Arabic font is not available, use transliteration
                 return self._transliterate_arabic(text)
             else:
-                # If Arabic font is available, shape the text for proper rendering
-                return self._shape_arabic_text(text)
+                # If Arabic font is available, shape only the Arabic parts
+                try:
+                    if ARABIC_SHAPING_AVAILABLE:
+                        # Process mixed text properly - only reshape Arabic parts
+                        return self._process_mixed_text(text)
+                    else:
+                        return text
+                except:
+                    return text
         else:
             # English, other language, or Arabic language without Arabic characters - return as is
+            return text
+
+    def _process_mixed_text(self, text: str) -> str:
+        """Process mixed text, only reshaping Arabic parts while preserving symbols, digits, and dates"""
+        try:
+            # Split text into Arabic and non-Arabic parts
+            processed_parts = []
+            current_part = ""
+            is_arabic_part = False
+            
+            for char in text:
+                # Check if character is Arabic
+                is_arabic = '\u0600' <= char <= '\u06FF' or '\u0750' <= char <= '\u077F' or \
+                           '\u08A0' <= char <= '\u08FF' or '\uFB50' <= char <= '\uFDFF' or \
+                           '\uFE70' <= char <= '\uFEFF'
+                
+                if is_arabic != is_arabic_part:
+                    # Part type changed, process the current part
+                    if current_part:
+                        if is_arabic_part:
+                            # Process Arabic part only
+                            try:
+                                reshaped = arabic_reshaper.reshape(current_part)
+                                processed_parts.append(get_display(reshaped))
+                            except:
+                                processed_parts.append(current_part)
+                        else:
+                            # Keep non-Arabic part as is (preserves symbols, digits, dates)
+                            processed_parts.append(current_part)
+                    
+                    # Start new part
+                    current_part = char
+                    is_arabic_part = is_arabic
+                else:
+                    # Same type, add to current part
+                    current_part += char
+            
+            # Process the last part
+            if current_part:
+                if is_arabic_part:
+                    try:
+                        reshaped = arabic_reshaper.reshape(current_part)
+                        processed_parts.append(get_display(reshaped))
+                    except:
+                        processed_parts.append(current_part)
+                else:
+                    processed_parts.append(current_part)
+            
+            # Join all parts
+            result = ''.join(processed_parts)
+            logger.debug(f"Mixed text processed: '{text}' -> '{result}'")
+            return result
+
+        except Exception as e:
+            logger.warning(f"Error in mixed text processing: {e}")
             return text
 
     def _contains_arabic_text(self, text: str) -> bool:
@@ -412,21 +408,21 @@ class EnhancedGOSIReportGenerator:
         """Create custom paragraph styles for GOSI theme with language support"""
         styles = getSampleStyleSheet()
 
-        # Always use Helvetica for English text to avoid font issues
-        font_name = 'Helvetica'
-        alignment = TA_LEFT
-        
-        # Only use Arabic font for pure Arabic content
+        # Determine font and alignment based on language
         if language == 'ar':
+            # For Arabic language, use RTL alignment and Arabic font if available
             try:
-                # Check if ArabicFont is registered
                 if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
-                    font_name = 'ArabicFont'  # Use the family name, not individual variants
+                    font_name = 'ArabicFont'
                 else:
                     font_name = 'Helvetica'  # Fallback to Helvetica
             except:
                 font_name = 'Helvetica'
-            alignment = TA_RIGHT
+            alignment = TA_RIGHT  # RTL alignment for Arabic
+        else:
+            # For English and other languages, use LTR alignment
+            font_name = 'Helvetica'
+            alignment = TA_LEFT
 
         # Title style
         title_style = ParagraphStyle(
@@ -456,7 +452,7 @@ class EnhancedGOSIReportGenerator:
             parent=styles['Normal'],
             fontSize=11,
             textColor=colors.HexColor(self.gosi_colors['text']),
-            alignment=TA_JUSTIFY if language == 'en' else TA_RIGHT,
+            alignment=alignment,  # Use the determined alignment (RTL for Arabic, LTR for English)
             spaceAfter=6,
             fontName=font_name
         )
@@ -467,7 +463,7 @@ class EnhancedGOSIReportGenerator:
             parent=styles['Normal'],
             fontSize=9,
             textColor=colors.HexColor('#666666'),
-            alignment=TA_JUSTIFY if language == 'en' else TA_RIGHT,
+            alignment=alignment,  # Use the determined alignment (RTL for Arabic, LTR for English)
             spaceAfter=6,
             fontName=font_name,  # Use base font name, not oblique variant
             borderWidth=1,
@@ -502,12 +498,21 @@ class EnhancedGOSIReportGenerator:
         # Header with GOSI logo and title
         if self.logo_path and os.path.exists(self.logo_path):
             try:
-                # Add logo to header - moved higher up
+                # Add logo to header - positioned based on language
                 logo_width = 1.5 * inch
                 logo_height = 0.5 * inch
+                
+                # Position logo on right side for English, left side for Arabic
+                if language == 'ar':
+                    # Arabic: logo on the left side
+                    logo_x = 50
+                else:
+                    # English: logo on the right side
+                    logo_x = doc.width + doc.leftMargin - logo_width - 50
+                
                 canvas.drawImage(
                     self.logo_path,
-                    x=50,
+                    x=logo_x,
                     y=doc.height + doc.topMargin - logo_height + 40,  # Moved up by 30 points
                     width=logo_width,
                     height=logo_height,
@@ -532,11 +537,22 @@ class EnhancedGOSIReportGenerator:
 
         canvas.setFillColor(colors.HexColor(self.gosi_colors['primary']))
         header_text = self.get_localized_text('title', language)
-        canvas.drawRightString(
-            doc.width + doc.leftMargin,
-            doc.height + doc.topMargin + 10,  # Moved up by 30 points
-            header_text
-        )
+        
+        # Use appropriate alignment for header text
+        if language == 'ar':
+            # For Arabic, draw from right side
+            canvas.drawRightString(
+                doc.width + doc.leftMargin,
+                doc.height + doc.topMargin + 10,
+                header_text
+            )
+        else:
+            # For English, draw from left side
+            canvas.drawString(
+                doc.leftMargin,
+                doc.height + doc.topMargin + 10,
+                header_text
+            )
 
         # Header line - moved higher up
         canvas.setStrokeColor(colors.HexColor(self.gosi_colors['accent']))
@@ -563,11 +579,22 @@ class EnhancedGOSIReportGenerator:
 
         canvas.setFillColor(colors.HexColor('#666666'))
         footer_text = f"{self.get_localized_text('generated_on', language)} {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | {self.get_localized_text('page', language)} {doc.page}"
-        canvas.drawCentredString(
-            doc.width / 2 + doc.leftMargin,
-            30,
-            footer_text
-        )
+        
+        # Use appropriate alignment for footer text
+        if language == 'ar':
+            # For Arabic, draw from right side
+            canvas.drawRightString(
+                doc.width + doc.leftMargin,
+                30,
+                footer_text
+            )
+        else:
+            # For English, center the footer
+            canvas.drawCentredString(
+                doc.width / 2 + doc.leftMargin,
+                30,
+                footer_text
+            )
 
         # Footer line
         canvas.setStrokeColor(colors.HexColor(self.gosi_colors['accent']))
@@ -649,12 +676,19 @@ class EnhancedGOSIReportGenerator:
             header_font = 'Helvetica-Bold'
             data_font = 'Helvetica'
 
+        # Determine table alignment based on language
+        table_alignment = 'CENTER'  # Default to center
+        if language == 'ar' and has_arabic_content:
+            table_alignment = 'RIGHT'  # RTL alignment for Arabic content
+        elif language == 'en':
+            table_alignment = 'LEFT'  # LTR alignment for English content
+
         # Enhanced GOSI table styling
         table_style = TableStyle([
             # Header styling - Blue background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(self.gosi_colors['table_header'])),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (-1, -1), table_alignment),  # Use language-appropriate alignment
             ('FONTNAME', (0, 0), (-1, 0), header_font),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
 
