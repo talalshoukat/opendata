@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from collections import OrderedDict
 
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # Import the agentic system components
 from config.config import Config
 from agents.agent_planner import AgentPlanner
+from config.state import AgentState
 
 # Initialize FastAPI app
 app = FastAPI(title="AI Chat Assistant", description="Chat interface for Agentic AI System")
@@ -50,6 +51,7 @@ agent: Optional[AgentPlanner] = None
 
 # Global LLM manager for general questions
 llm_manager: Optional[LLMManager] = None
+
 
 # LRU Cache for query storage with max 200 entries
 MAX_QUERY_CACHE_SIZE = 2
@@ -115,6 +117,27 @@ class ChartResponse(BaseModel):
 class ReportResponse(BaseModel):
     success: bool
     report_url: Optional[str] = None
+    error: Optional[str] = None
+
+class ProgressUpdate(BaseModel):
+    step: str
+    status: str
+    message: str
+    data: Optional[Dict] = None
+    error: Optional[str] = None
+    timestamp: str
+
+class StreamingChatResponse(BaseModel):
+    success: bool
+    message: str
+    has_chart: bool = False
+    has_report: bool = False
+    has_data: bool = False
+    data: Optional[List[Dict]] = None
+    columns: Optional[List[str]] = None
+    row_count: Optional[int] = None
+    column_count: Optional[int] = None
+    query_id: Optional[str] = None
     error: Optional[str] = None
 
 def initialize_agent():
@@ -550,6 +573,387 @@ async def process_chat_message(chat_request: ChatRequest):
             error=f"Error processing query: {str(e)}"
         )
 
+@app.post("/api/chat/streaming")
+async def process_chat_message_streaming(chat_request: ChatRequest):
+    """Process a chat message with streaming progress updates"""
+    global agent, llm_manager
+
+    if not agent:
+        raise HTTPException(status_code=500, detail="Agent not initialized")
+
+    if not llm_manager:
+        raise HTTPException(status_code=500, detail="LLM manager not initialized")
+
+    if not chat_request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    async def generate_stream():
+        try:
+            user_query = chat_request.message.strip()
+
+            # Check if this is a general question or data-related query
+            is_data_related = llm_manager.is_data_related_query(user_query)
+
+            if not is_data_related:
+                # Handle as general conversation
+                print(f"🤖 Processing general question: {user_query}")
+                general_response = llm_manager.handle_general_question(user_query)
+
+                if general_response['success']:
+                    # Send progress update
+                    progress = ProgressUpdate(
+                        step="general_response",
+                        status="completed",
+                        message="Processing general question...",
+                        timestamp=datetime.now().isoformat()
+                    )
+                    yield f"data: {progress.json()}\n\n"
+
+                    # Send final response
+                    final_response = StreamingChatResponse(
+                        success=True,
+                        message=general_response['response'],
+                        has_chart=False,
+                        has_report=False,
+                        has_data=False,
+                        data=None,
+                        columns=None,
+                        row_count=None,
+                        column_count=None,
+                        query_id=None
+                    )
+                    yield f"data: {final_response.json()}\n\n"
+                else:
+                    # Send error response
+                    final_response = StreamingChatResponse(
+                        success=False,
+                        message="I'm sorry, I'm having trouble processing your question right now. Please try again.",
+                        has_chart=False,
+                        has_report=False,
+                        has_data=False,
+                        data=None,
+                        columns=None,
+                        row_count=None,
+                        column_count=None,
+                        query_id=None
+                    )
+                    yield f"data: {final_response.json()}\n\n"
+                return
+
+            # Process the query using streaming workflow
+            print(f"📊 Processing data-related query with streaming: {user_query}")
+
+            # Generate a unique query ID
+            import hashlib
+            message_hash = hashlib.md5(chat_request.message.strip().encode()).hexdigest()[:8]
+            query_id = f"query_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{message_hash}"
+            print(f"🆔 Generated query_id: {query_id}")
+
+            # # Send start progress
+            # progress = ProgressUpdate(
+            #     step="start",
+            #     status="started",
+            #     message="Starting query processing...",
+            #     timestamp=datetime.now().isoformat()
+            # )
+            # yield f"data: {progress.json()}\n\n"
+
+            # Process query step by step with progress updates
+            state = AgentState(user_query=user_query)
+
+            # Step 1: Normalize keywords
+            progress = ProgressUpdate(
+                step="normalize_keywords",
+                status="started",
+                message="Improving query...Enhancing it by Normalizing Keywords...",
+                timestamp=datetime.now().isoformat()
+            )
+            yield f"data: {progress.json()}\n\n"
+
+            state = agent._normalize_keywords_node(state)
+            if state.errors:
+                progress = ProgressUpdate(
+                    step="normalize_keywords",
+                    status="error",
+                    message=f"Keyword normalization failed: {state.errors[-1]}",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+                return
+            else:
+                progress = ProgressUpdate(
+                    step="normalize_keywords",
+                    status="completed",
+                    message="User request analyzed. Keywords successfully normalized and stored as embeddings in the vector store.",
+                    # message=f"Keywords normalized successfully from Embedding. {len(state.replacements or [])} replacements made.",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+            # Step 2: Inspect schema
+            progress = ProgressUpdate(
+                step="inspect_schema",
+                status="started",
+                message="Inspecting database schema...",
+                timestamp=datetime.now().isoformat()
+            )
+            yield f"data: {progress.json()}\n\n"
+
+            state = agent._inspect_schema_node(state)
+            if state.errors:
+                progress = ProgressUpdate(
+                    step="inspect_schema",
+                    status="error",
+                    message=f"Schema inspection failed: {state.errors[-1]}",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+                return
+            else:
+                schema_count = len(state.database_schemas) if state.database_schemas else 0
+                progress = ProgressUpdate(
+                    step="inspect_schema",
+                    status="completed",
+                    message=f"Schema inspection complete. Found {schema_count} tables.",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+            # Step 3: Generate SQL
+            progress = ProgressUpdate(
+                step="generate_sql",
+                status="started",
+                message="Generating SQL query...",
+                timestamp=datetime.now().isoformat()
+            )
+            yield f"data: {progress.json()}\n\n"
+
+            state = agent._generate_sql_node(state)
+            if state.errors:
+                progress = ProgressUpdate(
+                    step="generate_sql",
+                    status="error",
+                    message=f"SQL generation failed: {state.errors[-1]}",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+                return
+            else:
+                sql_preview = state.generated_sql[:100] + "..." if state.generated_sql and len(state.generated_sql) > 100 else state.generated_sql
+                progress = ProgressUpdate(
+                    step="generate_sql",
+                    status="completed",
+                    message=f"SQL generated successfully: {sql_preview}",
+                    data={"sql_query": state.generated_sql, "sql_preview": sql_preview},
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+            # Step 4: Execute query
+            progress = ProgressUpdate(
+                step="execute_query",
+                status="started",
+                message="Executing SQL query...",
+                timestamp=datetime.now().isoformat()
+            )
+            yield f"data: {progress.json()}\n\n"
+
+            state = agent._execute_query_node(state)
+            if state.errors:
+                progress = ProgressUpdate(
+                    step="execute_query",
+                    status="error",
+                    message=f"Query execution failed: {state.errors[-1]}",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+                return
+            else:
+                row_count = len(state.sql_execution_result) if state.sql_execution_result is not None else 0
+                column_count = len(state.sql_execution_result.columns) if state.sql_execution_result is not None else 0
+                dataframe_data = state.sql_execution_result.to_dict('records') if state.sql_execution_result is not None else []
+                columns = list(state.sql_execution_result.columns) if state.sql_execution_result is not None else []
+
+                progress = ProgressUpdate(
+                    step="execute_query",
+                    status="completed",
+                    message=f"Query executed successfully. Retrieved {row_count} rows.",
+                    data={
+                        "row_count": row_count,
+                        "column_count": column_count,
+                        "dataframe_data": dataframe_data[:10],  # First 10 rows for preview
+                        "columns": columns,
+                        "total_rows": len(dataframe_data)
+                    },
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+            # Step 5: Format results
+            progress = ProgressUpdate(
+                step="format_results",
+                status="started",
+                message="Formatting results...",
+                timestamp=datetime.now().isoformat()
+            )
+            yield f"data: {progress.json()}\n\n"
+
+            state = agent._format_results_node(state)
+            if state.errors:
+                progress = ProgressUpdate(
+                    step="format_results",
+                    status="error",
+                    message=f"Result formatting failed: {state.errors[-1]}",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+                return
+            else:
+                progress = ProgressUpdate(
+                    step="format_results",
+                    status="completed",
+                    message="Results formatted successfully.",
+                    data={
+                        "natural_response": state.final_response,
+                        "visualization_code": state.visualization_code if hasattr(state, 'visualization_code') else None
+                    },
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+            # Step 6: Generate chart (optional)
+            if state.sql_execution_result is not None and not state.sql_execution_result.empty:
+                progress = ProgressUpdate(
+                    step="generate_chart",
+                    status="started",
+                    message="Generating visualization...",
+                    timestamp=datetime.now().isoformat()
+                )
+                yield f"data: {progress.json()}\n\n"
+
+                state = agent._generate_chart_node(state)
+                if state.errors:
+                    progress = ProgressUpdate(
+                        step="generate_chart",
+                        status="error",
+                        message=f"Chart generation failed: {state.errors[-1]}",
+                        timestamp=datetime.now().isoformat()
+                    )
+                    yield f"data: {progress.json()}\n\n"
+                else:
+                    # Execute the visualization code to generate plot data
+                    plot_data = None
+                    plot_layout = None
+                    plot_config = None
+
+                    if hasattr(state, 'visualization_code') and state.visualization_code and state.sql_execution_result is not None:
+                        try:
+                            plot_result = execute_visualization_code(state.visualization_code, state.sql_execution_result)
+                            plot_data = plot_result.get('data')
+                            plot_layout = plot_result.get('layout')
+                            plot_config = plot_result.get('config')
+                        except Exception as e:
+                            print(f"Error executing visualization code: {e}")
+
+                    progress = ProgressUpdate(
+                        step="generate_chart",
+                        status="completed",
+                        message="Chart generated successfully.",
+                        data={
+                            "visualization_code": state.visualization_code if hasattr(state, 'visualization_code') else None,
+                            "has_chart": True,
+                            "plot_data": plot_data,
+                            "plot_layout": plot_layout,
+                            "plot_config": plot_config
+                        },
+                        timestamp=datetime.now().isoformat()
+                    )
+                    yield f"data: {progress.json()}\n\n"
+
+            # Check if chart and report data are available
+            has_data = (hasattr(state, 'sql_execution_result') and
+                       state.sql_execution_result is not None and
+                       not state.sql_execution_result.empty)
+
+            has_chart = has_data  # If we have data, we can generate charts
+            has_report = has_data  # If we have data, we can generate reports
+
+            # Prepare dataframe data if available
+            dataframe_data = None
+            columns = None
+            row_count = None
+            column_count = None
+
+            if has_data and hasattr(state, 'sql_execution_result') and state.sql_execution_result is not None:
+                dataframe_data = state.sql_execution_result.to_dict('records')
+                columns = list(state.sql_execution_result.columns)
+                row_count = len(dataframe_data)
+                column_count = len(columns)
+
+            # Store the result state for later use (always store if we have data)
+            if has_data:
+                storage_data = {
+                    'result_state': state,
+                    'original_query': chat_request.message.strip(),
+                    'timestamp': datetime.now().isoformat()
+                }
+                add_to_query_storage(query_id, storage_data)
+                print(f"✅ Stored query in storage with ID: {query_id}")
+                # query_storage[query_id] = {
+                #     'result_state': state,
+                #     'original_query': chat_request.message.strip(),
+                #     'timestamp': datetime.now().isoformat()
+                # }
+                # print(f"✅ Stored query in storage with ID: {query_id}")
+                # print(f"📊 Query storage now has {len(query_storage)} entries")
+            else:
+                print(f"⚠️ No data available, not storing query: {query_id}")
+
+            # Get the natural language response
+            response = state.final_response or "I processed your query but couldn't generate a response."
+
+            # Send final response
+            final_response = StreamingChatResponse(
+                success=True,
+                message=response,
+                has_chart=bool(has_chart),
+                has_report=bool(has_report),
+                has_data=bool(has_data),
+                data=dataframe_data,
+                columns=columns,
+                row_count=row_count,
+                column_count=column_count,
+                query_id=query_id if (has_chart or has_report or has_data) else None
+            )
+            yield f"data: {final_response.json()}\n\n"
+
+        except Exception as e:
+            print(f"Error in streaming chat: {e}")
+            error_response = StreamingChatResponse(
+                success=False,
+                message="",
+                has_chart=False,
+                has_report=False,
+                has_data=False,
+                data=None,
+                columns=None,
+                row_count=None,
+                column_count=None,
+                query_id=None,
+                error=f"Error processing query: {str(e)}"
+            )
+            yield f"data: {error_response.json()}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream"
+        }
+    )
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
@@ -666,16 +1070,16 @@ async def generate_report(query_id: str):
             
             # Generate plot figure for the report if visualization code is available
 
-            result_state = agent.generate_chart_for_data(
+            state = agent.generate_chart_for_data(
                 original_query,
                 result_state.sql_execution_result,
                 result_state.database_schemas
             )
-            if (hasattr(result_state, 'visualization_code') and 
-                result_state.visualization_code):
+            if (hasattr(state, 'visualization_code') and
+                state.visualization_code):
                 try:
                     print(f"Generating plot figure for PDF report...")
-                    plot_result = execute_visualization_code(result_state.visualization_code, result_state.sql_execution_result)
+                    plot_result = execute_visualization_code(state.visualization_code, state.sql_execution_result)
                     plot_data = plot_result.get('data')
                     plot_layout = plot_result.get('layout')
                     plot_config = plot_result.get('config')
@@ -730,7 +1134,9 @@ async def get_example_queries():
     examples = [
         "Compare private vs stock contributors in Riyadh for whole year of 2018?",
         "Compare construction and commerce sectors across top three cities?",
-        "compare contributor in manufacturing and community service sector in 2018 in riyadh for each quarter?"
+        "compare contributor in manufacturing and community service sector in 2018 in riyadh for each quarter?",
+        "Show me the occupations registered in makkah?",
+        "Compare saudis and non saudis in year 2023 and 2024?"
     ]
     return {"examples": examples}
 

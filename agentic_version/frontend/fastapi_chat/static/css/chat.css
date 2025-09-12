@@ -321,6 +321,206 @@ body {
     }
 }
 
+/* Progress Steps Styles */
+.progress-container {
+    margin: 10px 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.progress-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.progress-step {
+    display: none; /* Hidden by default */
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+    opacity: 0.6;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.progress-step[style*="display: flex"] {
+    animation: fadeInSlide 0.3s ease-in-out;
+}
+
+.progress-step.started {
+    background-color: #e3f2fd;
+    border-color: #2196f3;
+    opacity: 1;
+}
+
+.progress-step.completed {
+    background-color: #e8f5e8;
+    border-color: #4caf50;
+    opacity: 1;
+}
+
+.progress-step.error {
+    background-color: #ffebee;
+    border-color: #f44336;
+    opacity: 1;
+}
+
+.progress-step i {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+}
+
+.progress-step span {
+    font-size: 14px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.progress-step.completed span {
+    color: #2e7d32;
+}
+
+.progress-step.error span {
+    color: #c62828;
+}
+
+.progress-step.started span {
+    color: #1565c0;
+}
+
+.sql-preview, .data-preview {
+    margin-top: 8px;
+}
+
+.sql-preview pre {
+    background-color: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 12px;
+    overflow-x: auto;
+    margin: 0;
+}
+
+.sql-preview code {
+    color: #333;
+    font-family: 'Courier New', monospace;
+}
+
+.data-preview .alert {
+    margin: 0;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.dataframe-preview {
+    margin-top: 12px;
+}
+
+.dataframe-preview h6 {
+    color: #495057;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.dataframe-preview .table {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+.dataframe-preview .table th {
+    font-size: 11px;
+    padding: 4px 6px;
+}
+
+.dataframe-preview .table td {
+    padding: 4px 6px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.results-preview .alert {
+    margin: 0;
+    padding: 12px;
+    font-size: 14px;
+}
+
+.results-preview .alert div {
+    line-height: 1.5;
+}
+
+.chart-preview {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.chart-preview .alert {
+    margin: 0;
+    padding: 12px;
+    font-size: 14px;
+}
+
+.chart-preview .chart-container {
+    margin-top: 12px;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 12px;
+    background-color: #f8f9fa;
+    min-height: 520px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.chart-preview .chart-container div[id^="chart-"] {
+    border-radius: 4px;
+    overflow: hidden;
+    width: 100% !important;
+    height: 500px !important;
+}
+
+.final-response {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+}
+
+.final-response strong {
+    color: #495057;
+    font-weight: 600;
+}
+
+.progress-step.completed .sql-preview,
+.progress-step.completed .data-preview,
+.progress-step.completed .dataframe-preview,
+.progress-step.completed .results-preview,
+.progress-step.completed .chart-preview {
+    display: block;
+    margin-top: 8px;
+    width: 100%;
+    max-width: 100%;
+}
+
+.progress-step:not(.completed) .sql-preview,
+.progress-step:not(.completed) .data-preview,
+.progress-step:not(.completed) .dataframe-preview,
+.progress-step:not(.completed) .results-preview,
+.progress-step:not(.completed) .chart-preview {
+    display: none;
+}
+
 /* Scrollbar Styling */
 .chat-messages::-webkit-scrollbar {
     width: 6px;
@@ -432,5 +632,66 @@ body {
 @keyframes spin {
     to {
         transform: rotate(360deg);
+    }
+}
+
+/* Make charts responsive within the chat interface */
+.chart-preview .chart-container .js-plotly-plot {
+    width: 100% !important;
+    height: 500px !important;
+    max-width: none !important;
+}
+
+.chart-preview .chart-container .plotly {
+    width: 100% !important;
+    height: 500px !important;
+    max-width: none !important;
+}
+
+/* Ensure chart elements expand to full width */
+.chart-preview .chart-container .plotly .main-svg {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+.chart-preview .chart-container .plotly .svg-container {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+/* Ensure chart container is prominent in chat messages */
+.assistant-message .chart-preview .chart-container {
+    max-width: 100%;
+    width: 100%;
+    margin: 16px 0;
+    box-sizing: border-box;
+}
+
+/* Make chart container responsive on smaller screens */
+@media (max-width: 768px) {
+    .chart-preview .chart-container {
+        min-height: 400px;
+        padding: 8px;
+    }
+
+    .chart-preview .chart-container div[id^="chart-"] {
+        height: 400px !important;
+    }
+
+    .chart-preview .chart-container .js-plotly-plot,
+    .chart-preview .chart-container .plotly {
+        height: 400px !important;
+    }
+}
+
+/* Animation for progress steps appearing */
+@keyframes fadeInSlide {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }

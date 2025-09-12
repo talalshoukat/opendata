@@ -682,14 +682,7 @@ def create_chart(data):
 
             # Check for proper table references
             if 'from' in sql_lower and not any(
-                    table in sql_lower for table in [
-                        'private_sector_contributor_distribution_by_legal_entity',
-                                                     'private_sector_contributor_distribution_by_economic_activity',
-                                                     'private_sector_contributor_distribution_by_occupation_group',
-                                                     'annuity_benefit',
-                                                     'establishments_by_region',
-                                                     'contributors_by_nationality',
-                                                     'total_beneficiaries']):
+                    table in sql_lower for table in Config.TABLES):
                 return False
 
             return True

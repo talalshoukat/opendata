@@ -28,6 +28,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 import matplotlib.pyplot as plt
 import matplotlib
 
+from agentic_version.tools.pdf_style_manager import PDFStyleManager
+
 matplotlib.use('Agg')  # Use non-interactive backend
 import logging
 
@@ -73,169 +75,6 @@ class EnhancedGOSIReportGenerator:
             logger.warning(f"GOSI logo not found at {self.logo_path}")
             self.logo_path = None
 
-        # Register Arabic fonts
-        self.register_arabic_fonts()
-
-    def register_arabic_fonts(self):
-        """Register Arabic fonts for proper Arabic text rendering"""
-        try:
-            # Try to register SF Arabic font (macOS) - best option for Arabic
-            sf_arabic_path = '/System/Library/Fonts/SFArabic.ttf'
-            if os.path.exists(sf_arabic_path):
-                try:
-                    pdfmetrics.registerFont(TTFont('ArabicFont', sf_arabic_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', sf_arabic_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', sf_arabic_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', sf_arabic_path))
-                    
-                    # Register the font family
-                    pdfmetrics.registerFontFamily(
-                        'ArabicFont',
-                        normal='ArabicFont',
-                        bold='ArabicFont-Bold',
-                        italic='ArabicFont-Italic',
-                        boldItalic='ArabicFont-BoldItalic'
-                    )
-                    logger.info(f"Successfully registered SF Arabic font family: {sf_arabic_path}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to register SF Arabic font: {e}")
-
-            # Try to register Arial Unicode MS (macOS) - supports Arabic
-            arial_path = '/System/Library/Fonts/ArialHB.ttc'
-            if os.path.exists(arial_path):
-                try:
-                    pdfmetrics.registerFont(TTFont('ArabicFont', arial_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', arial_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', arial_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', arial_path))
-                    
-                    # Register the font family
-                    pdfmetrics.registerFontFamily(
-                        'ArabicFont',
-                        normal='ArabicFont',
-                        bold='ArabicFont-Bold',
-                        italic='ArabicFont-Italic',
-                        boldItalic='ArabicFont-BoldItalic'
-                    )
-                    logger.info(f"Successfully registered Arial font family: {arial_path}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to register Arial font: {e}")
-
-            # Try to register bundled Noto fonts if available
-            bundled_font_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', 'NotoSansArabic-Regular.ttf')
-            if os.path.exists(bundled_font_path):
-                try:
-                    pdfmetrics.registerFont(TTFont('ArabicFont', bundled_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Bold', bundled_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-Italic', bundled_font_path))
-                    pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', bundled_font_path))
-                    
-                    # Register the font family
-                    pdfmetrics.registerFontFamily(
-                        'ArabicFont',
-                        normal='ArabicFont',
-                        bold='ArabicFont-Bold',
-                        italic='ArabicFont-Italic',
-                        boldItalic='ArabicFont-BoldItalic'
-                    )
-
-                    logger.info(f"Successfully registered Arabic font family: {bundled_font_path}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to register bundled font: {e}")
-
-            # Try to register common Arabic fonts that might be available on the system
-            arabic_fonts = [
-                # Common Arabic fonts on different systems
-                '/System/Library/Fonts/Arial Unicode MS.ttf',  # macOS
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # Linux
-                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',  # Linux
-                'C:\\Windows\\Fonts\\arial.ttf',  # Windows
-                'C:\\Windows\\Fonts\\calibri.ttf',  # Windows
-                'C:\\Windows\\Fonts\\tahoma.ttf',  # Windows (supports Arabic)
-                'C:\\Windows\\Fonts\\segoeui.ttf',  # Windows (supports Arabic)
-            ]
-
-            for font_path in arabic_fonts:
-                if os.path.exists(font_path):
-                    try:
-                        # Register the font with multiple variants
-                        pdfmetrics.registerFont(TTFont('ArabicFont', font_path))
-                        pdfmetrics.registerFont(TTFont('ArabicFont-Bold', font_path))
-                        pdfmetrics.registerFont(TTFont('ArabicFont-Italic', font_path))
-                        pdfmetrics.registerFont(TTFont('ArabicFont-BoldItalic', font_path))
-
-                        # Register the font family
-                        pdfmetrics.registerFontFamily(
-                            'ArabicFont',
-                            normal='ArabicFont',
-                            bold='ArabicFont-Bold',
-                            italic='ArabicFont-Italic',
-                            boldItalic='ArabicFont-BoldItalic'
-                        )
-
-                        logger.info(f"Successfully registered Arabic font family: {font_path}")
-                        return
-                    except Exception as e:
-                        logger.warning(f"Failed to register font {font_path}: {e}")
-                        continue
-
-            # If no Arabic fonts found, create a fallback solution
-            logger.warning("No Arabic fonts found. Using fallback approach for Arabic text.")
-            self._create_fallback_arabic_support()
-
-        except Exception as e:
-            logger.error(f"Error registering Arabic fonts: {e}")
-
-    def _create_fallback_arabic_support(self):
-        """Create a fallback solution for Arabic text when no Arabic fonts are available"""
-        try:
-            # For now, we'll use a simple approach - convert Arabic to transliterated text
-            # This is a temporary solution until we can get proper Arabic fonts
-            logger.info("Arabic font fallback: Using transliteration approach")
-        except Exception as e:
-            logger.error(f"Error creating Arabic fallback: {e}")
-
-    def _shape_arabic_text(self, text: str) -> str:
-        """Shape Arabic text for proper rendering with connected characters"""
-        if not ARABIC_SHAPING_AVAILABLE:
-            logger.warning("Arabic text shaping libraries not available")
-            return text
-
-        try:
-            # Simple approach - just reshape and apply bidi
-            reshaped_text = arabic_reshaper.reshape(text)
-            shaped_text = get_display(reshaped_text)
-            logger.debug(f"Arabic text shaped: '{text}' -> '{shaped_text}'")
-            return shaped_text
-
-        except Exception as e:
-            logger.warning(f"Error in Arabic text shaping: {e}")
-            return text
-
-
-    def _transliterate_arabic(self, text: str) -> str:
-        """Simple Arabic to Latin transliteration for fallback"""
-        # Basic Arabic to Latin transliteration mapping
-        arabic_to_latin = {
-            'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h', 'خ': 'kh',
-            'د': 'd', 'ذ': 'dh', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's',
-            'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q',
-            'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y',
-            'ء': 'a', 'آ': 'aa', 'أ': 'a', 'إ': 'i', 'ؤ': 'w', 'ئ': 'y',
-            'ة': 'h', 'ى': 'a', 'لا': 'la'
-        }
-
-        result = ""
-        for char in text:
-            if char in arabic_to_latin:
-                result += arabic_to_latin[char]
-            else:
-                result += char
-        return result
-
     def detect_language(self, text: str) -> str:
         """Detect if text is in Arabic or English"""
         # Simple Arabic detection - look for Arabic characters
@@ -246,6 +85,7 @@ class EnhancedGOSIReportGenerator:
 
     def get_localized_text(self, key: str, language: str = 'en') -> str:
         """Get localized text based on language"""
+        arabic_bullet = u"\u066D"  # bullet
         texts = {
             'en': {
                 'title': 'GOSI Data Analysis Report',
@@ -282,17 +122,18 @@ class EnhancedGOSIReportGenerator:
                 'subtitle': 'المؤسسة العامة للتأمينات الاجتماعية',
                 'report_date': 'تاريخ التقرير',
                 'disclaimer_title': 'إخلاء مسؤولية مهم',
-                'disclaimer_text': """
+                'disclaimer_text': f"""
                 <b>إخلاء مسؤولية تقرير تحليل البيانات:</b><br/><br/>
 
                 يحتوي هذا التقرير على نتائج تحليل البيانات من منصة البيانات المفتوحة للمؤسسة العامة للتأمينات الاجتماعية. 
                 يتم إنتاج التحليل والرسوم البيانية بناءً على البيانات المتاحة للجمهور وتهدف للأغراض الإعلامية فقط.<br/><br/>
 
                 <b>يرجى ملاحظة:</b><br/>
-                • جميع البيانات مصدرها منصة البيانات المفتوحة الرسمية للمؤسسة العامة للتأمينات الاجتماعية<br/>
-                • نتائج التحليل للأغراض الإعلامية والبحثية<br/>
-                • لا ينبغي استخدام هذا التقرير كأساس وحيد لاتخاذ القرارات التجارية<br/>
-                • للحصول على البيانات والتحليل الرسمي للمؤسسة العامة للتأمينات الاجتماعية، يرجى الرجوع إلى القنوات المعتمدة<br/><br/>
+                {arabic_bullet} جميع البيانات مصدرها منصة البيانات المفتوحة الرسمية للمؤسسة العامة للتأمينات الاجتماعية<br/>
+                {arabic_bullet} نتائج التحليل للأغراض الإعلامية والبحثية<br/>
+                {arabic_bullet} لا ينبغي استخدام هذا التقرير كأساس وحيد لاتخاذ القرارات التجارية<br/>
+                {arabic_bullet} للحصول على البيانات والتحليل الرسمي للمؤسسة العامة للتأمينات الاجتماعية، يرجى الرجوع إلى القنوات المعتمدة<br/><br/>
+
 
                 المؤسسة العامة للتأمينات الاجتماعية ملتزمة بتوفير بيانات شفافة ومتاحة لدعم البحث والتحليل.
                 """,
@@ -309,187 +150,12 @@ class EnhancedGOSIReportGenerator:
 
         text = texts.get(language, texts['en']).get(key, key)
 
-        # Process Arabic text for proper rendering
-        if language == 'ar':
-            text = self._process_arabic_text(text, language)
-
         return text
-
-    def _process_arabic_text(self, text: str, language: str) -> str:
-        """Process Arabic text for proper rendering, preserving symbols, digits, and dates"""
-        # Only process if it's explicitly Arabic language AND contains Arabic characters
-        if language == 'ar' and self._contains_arabic_text(text):
-            if not self._is_arabic_font_available():
-                # If Arabic font is not available, use transliteration
-                return self._transliterate_arabic(text)
-            else:
-                # If Arabic font is available, shape only the Arabic parts
-                try:
-                    if ARABIC_SHAPING_AVAILABLE:
-                        # Process mixed text properly - only reshape Arabic parts
-                        return self._process_mixed_text(text)
-                    else:
-                        return text
-                except:
-                    return text
-        else:
-            # English, other language, or Arabic language without Arabic characters - return as is
-            return text
-
-    def _process_mixed_text(self, text: str) -> str:
-        """Process mixed text, only reshaping Arabic parts while preserving symbols, digits, and dates"""
-        try:
-            # Split text into Arabic and non-Arabic parts
-            processed_parts = []
-            current_part = ""
-            is_arabic_part = False
-            
-            for char in text:
-                # Check if character is Arabic
-                is_arabic = '\u0600' <= char <= '\u06FF' or '\u0750' <= char <= '\u077F' or \
-                           '\u08A0' <= char <= '\u08FF' or '\uFB50' <= char <= '\uFDFF' or \
-                           '\uFE70' <= char <= '\uFEFF'
-                
-                if is_arabic != is_arabic_part:
-                    # Part type changed, process the current part
-                    if current_part:
-                        if is_arabic_part:
-                            # Process Arabic part only
-                            try:
-                                reshaped = arabic_reshaper.reshape(current_part)
-                                processed_parts.append(get_display(reshaped))
-                            except:
-                                processed_parts.append(current_part)
-                        else:
-                            # Keep non-Arabic part as is (preserves symbols, digits, dates)
-                            processed_parts.append(current_part)
-                    
-                    # Start new part
-                    current_part = char
-                    is_arabic_part = is_arabic
-                else:
-                    # Same type, add to current part
-                    current_part += char
-            
-            # Process the last part
-            if current_part:
-                if is_arabic_part:
-                    try:
-                        reshaped = arabic_reshaper.reshape(current_part)
-                        processed_parts.append(get_display(reshaped))
-                    except:
-                        processed_parts.append(current_part)
-                else:
-                    processed_parts.append(current_part)
-            
-            # Join all parts
-            result = ''.join(processed_parts)
-            logger.debug(f"Mixed text processed: '{text}' -> '{result}'")
-            return result
-
-        except Exception as e:
-            logger.warning(f"Error in mixed text processing: {e}")
-            return text
 
     def _contains_arabic_text(self, text: str) -> bool:
         """Check if text contains Arabic characters"""
         arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
         return bool(arabic_pattern.search(text))
-
-    def _is_arabic_font_available(self) -> bool:
-        """Check if Arabic font is available"""
-        try:
-            registered_fonts = pdfmetrics.getRegisteredFontNames()
-            return 'ArabicFont' in registered_fonts or 'ArabicFont-Bold' in registered_fonts
-        except:
-            return False
-
-    def create_styles(self, language: str = 'en') -> Dict[str, ParagraphStyle]:
-        """Create custom paragraph styles for GOSI theme with language support"""
-        styles = getSampleStyleSheet()
-
-        # Determine font and alignment based on language
-        if language == 'ar':
-            # For Arabic language, use RTL alignment and Arabic font if available
-            try:
-                if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
-                    font_name = 'ArabicFont'
-                else:
-                    font_name = 'Helvetica'  # Fallback to Helvetica
-            except:
-                font_name = 'Helvetica'
-            alignment = TA_RIGHT  # RTL alignment for Arabic
-        else:
-            # For English and other languages, use LTR alignment
-            font_name = 'Helvetica'
-            alignment = TA_LEFT
-
-        # Title style
-        title_style = ParagraphStyle(
-            'GOSITitle',
-            parent=styles['Title'],
-            fontSize=24,
-            textColor=colors.HexColor(self.gosi_colors['primary']),
-            alignment=TA_CENTER,
-            spaceAfter=20,
-            fontName=font_name  # Use family name, ReportLab will handle bold mapping
-        )
-
-        # Subtitle style
-        subtitle_style = ParagraphStyle(
-            'GOSISubtitle',
-            parent=styles['Heading2'],
-            fontSize=16,
-            textColor=colors.HexColor(self.gosi_colors['secondary']),
-            alignment=alignment,
-            spaceAfter=12,
-            fontName=font_name  # Use family name, ReportLab will handle bold mapping
-        )
-
-        # Body text style
-        body_style = ParagraphStyle(
-            'GOSIBody',
-            parent=styles['Normal'],
-            fontSize=11,
-            textColor=colors.HexColor(self.gosi_colors['text']),
-            alignment=alignment,  # Use the determined alignment (RTL for Arabic, LTR for English)
-            spaceAfter=6,
-            fontName=font_name
-        )
-
-        # Disclaimer style
-        disclaimer_style = ParagraphStyle(
-            'GOSIDisclaimer',
-            parent=styles['Normal'],
-            fontSize=9,
-            textColor=colors.HexColor('#666666'),
-            alignment=alignment,  # Use the determined alignment (RTL for Arabic, LTR for English)
-            spaceAfter=6,
-            fontName=font_name,  # Use base font name, not oblique variant
-            borderWidth=1,
-            borderColor=colors.HexColor('#CCCCCC'),
-            borderPadding=8,
-            backColor=colors.HexColor('#F9F9F9')
-        )
-
-        # Header style
-        header_style = ParagraphStyle(
-            'GOSIHeader',
-            parent=styles['Heading1'],
-            fontSize=18,
-            textColor=colors.HexColor(self.gosi_colors['primary']),
-            alignment=TA_CENTER,
-            spaceAfter=10,
-            fontName=font_name  # Use family name, ReportLab will handle bold mapping
-        )
-
-        return {
-            'title': title_style,
-            'subtitle': subtitle_style,
-            'body': body_style,
-            'disclaimer': disclaimer_style,
-            'header': header_style
-        }
 
     def create_header_footer(self, canvas, doc, language: str = 'en'):
         """Create header and footer for each page with language support"""
@@ -526,8 +192,8 @@ class EnhancedGOSIReportGenerator:
         # Always use Helvetica for English text, Arabic font only for Arabic content
         if language == 'ar':
             try:
-                if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
-                    canvas.setFont('ArabicFont', 14)  # Use family name
+                if 'Amiri-Regular' in pdfmetrics.getRegisteredFontNames():
+                    canvas.setFont('Amiri-Regular', 10)  # Use family name
                 else:
                     canvas.setFont('Helvetica-Bold', 14)
             except:
@@ -536,7 +202,8 @@ class EnhancedGOSIReportGenerator:
             canvas.setFont('Helvetica-Bold', 14)
 
         canvas.setFillColor(colors.HexColor(self.gosi_colors['primary']))
-        header_text = self.get_localized_text('title', language)
+        header_text = PDFStyleManager().reshape_text(self.get_localized_text('title', language),
+                                                     language=language)
         
         # Use appropriate alignment for header text
         if language == 'ar':
@@ -568,8 +235,8 @@ class EnhancedGOSIReportGenerator:
         # Always use Helvetica for English text, Arabic font only for Arabic content
         if language == 'ar':
             try:
-                if 'ArabicFont' in pdfmetrics.getRegisteredFontNames():
-                    canvas.setFont('ArabicFont', 8)  # Use family name
+                if 'Amiri-Regular' in pdfmetrics.getRegisteredFontNames():
+                    canvas.setFont('Amiri-Regular', 10)  # Use family name
                 else:
                     canvas.setFont('Helvetica', 8)
             except:
@@ -578,8 +245,11 @@ class EnhancedGOSIReportGenerator:
             canvas.setFont('Helvetica', 8)
 
         canvas.setFillColor(colors.HexColor('#666666'))
-        footer_text = f"{self.get_localized_text('generated_on', language)} {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | {self.get_localized_text('page', language)} {doc.page}"
-        
+        # footer_text = f"{self.get_localized_text('generated_on', language)} {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | {self.get_localized_text('page', language)} {doc.page}"
+        footer_text = PDFStyleManager().reshape_text(f"{self.get_localized_text('generated_on', language)} {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | {self.get_localized_text('page', language)} {doc.page}", language=language)
+        # PDFStyleManager().reshape_text(self.get_localized_text('title', language),
+        # language = language)
+
         # Use appropriate alignment for footer text
         if language == 'ar':
             # For Arabic, draw from right side
@@ -755,50 +425,58 @@ class EnhancedGOSIReportGenerator:
         )
 
         # Create styles
-        styles = self.create_styles(language)
+        styles = PDFStyleManager().create_styles(language=language)
 
         # Build story (content)
         story = []
 
         # Title page
         story.append(Spacer(1, 0.3 * inch))  # Reduced from 0.5*inch
-        story.append(Paragraph(self.get_localized_text('title', language), styles['title']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('title', language), language=language)
+
+        story.append(Paragraph(reshaped_text, styles['title']))
         story.append(Spacer(1, 0.2 * inch))  # Reduced from 0.3*inch
-        story.append(Paragraph(self.get_localized_text('subtitle', language), styles['subtitle']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('subtitle', language), language=language)
+        story.append(Paragraph(reshaped_text, styles['subtitle']))
+
         story.append(Spacer(1, 0.1 * inch))  # Reduced from 0.2*inch
-        story.append(
-            Paragraph(f"{self.get_localized_text('report_date', language)}: {datetime.now().strftime('%B %d, %Y')}",
-                      styles['body']))
+        reshaped_text = PDFStyleManager().reshape_text(f"{self.get_localized_text('report_date', language)}: {datetime.now().strftime('%B %d, %Y')}", language='ar')
+        story.append(Paragraph(reshaped_text, styles['body']))
         story.append(Spacer(1, 0.2 * inch))  # Added spacing instead of PageBreak
 
         # IMPORTANT DISCLAIMER - FIRST THING AFTER TITLE
-        story.append(Paragraph(self.get_localized_text('disclaimer_title', language), styles['header']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('disclaimer_title', language), language=language)
+        story.append(Paragraph(reshaped_text, styles['header']))
         story.append(Spacer(1, 0.05 * inch))  # Reduced from 0.1*inch
 
-        disclaimer_text = self.get_localized_text('disclaimer_text', language)
-        story.append(Paragraph(disclaimer_text, styles['disclaimer']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('disclaimer_text', language), language=language)
+        story.append(Paragraph(reshaped_text, styles['disclaimer']))
         story.append(Spacer(1, 0.2 * inch))  # Reduced from 0.3*inch
 
         # Executive Summary
-        story.append(Paragraph(self.get_localized_text('executive_summary', language), styles['header']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('executive_summary', language), language='ar')
+        story.append(Paragraph(reshaped_text, styles['header']))
         story.append(Spacer(1, 0.1 * inch))
-        processed_description = self._process_arabic_text(description, language)
-        story.append(Paragraph(processed_description, styles['body']))
+        reshaped_text = PDFStyleManager().reshape_text(description, language=language)
+        story.append(Paragraph(reshaped_text, styles['body']))
         story.append(Spacer(1, 0.2 * inch))
 
         # Data Analysis Section
-        story.append(Paragraph(self.get_localized_text('data_analysis', language), styles['subtitle']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('data_analysis', language), language=language)
+        story.append(Paragraph(reshaped_text, styles['subtitle']))
         story.append(Spacer(1, 0.1 * inch))
 
         # Original Query
         story.append(Paragraph("Original Query:", styles['body']))
-        processed_query = self._process_arabic_text(query, language)
+        processed_query = PDFStyleManager().reshape_text(query, language=language)
         story.append(Paragraph(f'<i>"{processed_query}"</i>', styles['body']))
         story.append(Spacer(1, 0.2 * inch))
 
         # Data Visualization
         if fig is not None:
-            story.append(Paragraph(self.get_localized_text('data_visualization', language), styles['subtitle']))
+            reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('data_visualization', language),
+                                                           language=language)
+            story.append(Paragraph(reshaped_text, styles['subtitle']))
             story.append(Spacer(1, 0.1 * inch))
 
             # Convert plotly figure to image
@@ -820,13 +498,18 @@ class EnhancedGOSIReportGenerator:
             story.append(Spacer(1, 0.2 * inch))
 
         # Data Overview
-        story.append(Paragraph(self.get_localized_text('data_overview', language), styles['subtitle']))
+        reshaped_text = PDFStyleManager().reshape_text(self.get_localized_text('data_overview', language),
+                                                       language=language)
+        story.append(Paragraph(reshaped_text, styles['subtitle']))
         story.append(Spacer(1, 0.1 * inch))
 
         # Data summary
-        story.append(Paragraph(f"{self.get_localized_text('total_records', language)}: {len(data)}", styles['body']))
-        story.append(Paragraph(f"{self.get_localized_text('columns', language)}: {', '.join(data.columns.tolist())}",
-                               styles['body']))
+        reshaped_text = PDFStyleManager().reshape_text(f"{self.get_localized_text('total_records', language)}: {len(data)}",
+                                                       language=language)
+        story.append(Paragraph(reshaped_text, styles['body']))
+        reshaped_text = PDFStyleManager().reshape_text(f"{self.get_localized_text('columns', language)}: {', '.join(data.columns.tolist())}",
+                                                       language=language)
+        story.append(Paragraph(reshaped_text, styles['body']))
         story.append(Spacer(1, 0.1 * inch))
 
         # Enhanced data table with GOSI theme

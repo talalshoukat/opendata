@@ -26,6 +26,11 @@ class ChatInterface {
     }
     
     async sendMessage() {
+        // Use streaming by default
+        await this.sendMessageStreaming();
+    }
+
+    async sendMessageStreaming() {
         const message = this.messageInput.value.trim();
         if (!message) return;
         
@@ -40,8 +45,54 @@ class ChatInterface {
             // Show typing indicator
             this.showTypingIndicator();
             
-            // Send message to API
-            const response = await fetch('/api/chat', {
+            // Create a progress message container
+            const progressMessageId = `progress-${Date.now()}`;
+            const progressMessageDiv = document.createElement('div');
+            progressMessageDiv.className = 'assistant-message message-enter';
+            progressMessageDiv.id = progressMessageId;
+//            <div class="progress-step" data-step="start">
+//                <i class="fas fa-play"></i>
+//                <span>Starting...</span>
+//            </div>
+            progressMessageDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="progress-container">
+                        <div class="progress-steps">
+                            <div class="progress-step" data-step="normalize_keywords" style="display: none;">
+                                <i class="fas fa-search"></i>
+                                <span>Improving query...Enhancing it by Normalizing Keywords </span>
+                            </div>
+                            <div class="progress-step" data-step="inspect_schema" style="display: none;">
+                                <i class="fas fa-database"></i>
+                                <span>Inspecting schema...</span>
+                            </div>
+                            <div class="progress-step" data-step="generate_sql" style="display: none;">
+                                <i class="fas fa-code"></i>
+                                <span>Generating SQL...</span>
+                            </div>
+                            <div class="progress-step" data-step="execute_query" style="display: none;">
+                                <i class="fas fa-play-circle"></i>
+                                <span>Executing query...</span>
+                            </div>
+                            <div class="progress-step" data-step="format_results" style="display: none;">
+                                <i class="fas fa-file-alt"></i>
+                                <span>Formatting results...</span>
+                            </div>
+                            <div class="progress-step" data-step="generate_chart" style="display: none;">
+                                <i class="fas fa-chart-bar"></i>
+                                <span>Generating chart...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="message-time">${new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}</div>
+            `;
+
+            this.chatMessages.appendChild(progressMessageDiv);
+            this.scrollToBottom();
+
+            // Send streaming request
+            const response = await fetch('/api/chat/streaming', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -49,31 +100,347 @@ class ChatInterface {
                 body: JSON.stringify({ message: message })
             });
             
-            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let finalResponse = null;
+            let hasData = false;
+            let hasChart = false;
+            let hasReport = false;
+            let queryId = null;
+            let dataframeData = null;
+            let columns = null;
+            let rowCount = null;
+            let columnCount = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.step && data.status) {
+                                // This is a progress update - update immediately
+                                console.log(`Progress update: ${data.step} - ${data.status} - ${data.message}`);
+                                this.updateProgressStep(progressMessageId, data.step, data.status, data.message, data.data);
+
+                                // Force scroll to bottom after each update
+                                this.scrollToBottom();
+
+                                // Add a small delay to make the updates visible
+                                await new Promise(resolve => setTimeout(resolve, 100));
+
+                            } else if (data.success !== undefined) {
+                                // This is the final response
+                                console.log('Final response received');
+                                finalResponse = data;
+                                hasData = data.has_data;
+                                hasChart = data.has_chart;
+                                hasReport = data.has_report;
+                                queryId = data.query_id;
+                                dataframeData = data.data;
+                                columns = data.columns;
+                                rowCount = data.row_count;
+                                columnCount = data.column_count;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing streaming data:', e);
+                        }
+                    }
+                }
+            }
+
+            // Add final response section without replacing existing progress data
+            const progressElement = document.getElementById(progressMessageId);
+            if (progressElement && finalResponse) {
+                if (finalResponse.success) {
+//                    // Add final response section to existing content
+//                    const existingContent = progressElement.querySelector('.message-content');
+//                    if (existingContent) {
+//                        const finalResponseDiv = document.createElement('div');
+//                        finalResponseDiv.className = 'final-response mt-3';
+//                        finalResponseDiv.innerHTML = `
+//                            <strong>Final Response:</strong><br>
+//                            ${finalResponse.message}
+//                        `;
+//                        existingContent.appendChild(finalResponseDiv);
+//
+//                        // Add dataframe if available
+//                        if (dataframeData && columns && rowCount && columnCount) {
+//                            const dataframeContainer = this.createDataframeContainer(dataframeData, columns, rowCount, columnCount);
+//                            existingContent.appendChild(dataframeContainer);
+//                        }
+//
+//                        // Add action buttons if available
+//                        if (hasChart || hasReport || hasData) {
+//                            const actionButtons = this.createActionButtons(hasChart, hasReport, hasData, queryId);
+//                            existingContent.appendChild(actionButtons);
+//                        }
+//                    }
+
+                    // Update the class to be a regular assistant message
+                    progressElement.className = 'assistant-message message-enter';
+                    progressElement.removeAttribute('id');
+                } else {
+                    // Show error in progress container
+                    const existingContent = progressElement.querySelector('.message-content');
+                    if (existingContent) {
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'final-response mt-3 error-message';
+                        errorDiv.innerHTML = `
+                            <strong>Error:</strong><br>
+                            ${finalResponse.message || 'Sorry, I encountered an error processing your request.'}
+                        `;
+                        existingContent.appendChild(errorDiv);
+                    }
+                    progressElement.className = 'assistant-message message-enter error-message';
+                    progressElement.removeAttribute('id');
+                }
+            } else {
+                // Fallback: remove progress and add regular message
+                if (progressElement) {
+                    progressElement.remove();
+                }
+                if (finalResponse && finalResponse.success) {
+                    this.addMessage('assistant', finalResponse.message, null, null, false, hasChart, hasReport, hasData, queryId, dataframeData, columns, rowCount, columnCount);
+                } else {
+                    this.addMessage('assistant', finalResponse?.message || 'Sorry, I encountered an error processing your request.', null, null, true);
+                }
+            }
             
-            if (data.success) {
-                console.log('Chat response data:', data);
+            if (true) {
+ /*               console.log('Chat response data:', data);
                 console.log('Has chart:', data.has_chart);
                 console.log('Has report:', data.has_report);
                 console.log('Has data:', data.has_data);
                 console.log('Query ID:', data.query_id);
-                
+*/
                 // Add assistant response with action buttons if available
-                this.addMessage('assistant', data.message, null, null, false, data.has_chart, data.has_report, data.has_data, data.query_id, data.data, data.columns, data.row_count, data.column_count);
+                this.addMessage('assistant', '', null, null, false, hasChart, hasReport, false, queryId, false, false, false, false);
+
+//                this.addMessage('assistant', null, null, null, false, true, true, false, false, false, false, false, false);
             } else {
                 // Show error message
                 this.addMessage('assistant', `Sorry, I encountered an error: ${data.error || 'Unknown error'}`, null, null, true);
             }
             
         } catch (error) {
-            console.error('Error sending message:', error);
+            console.error('Error in streaming chat:', error);
             this.addMessage('assistant', 'Sorry, I encountered a network error. Please try again.', null, null, true);
         } finally {
             this.hideTypingIndicator();
             this.setLoadingState(false);
         }
     }
-    
+
+    updateProgressStep(messageId, step, status, message, data) {
+        const progressElement = document.getElementById(messageId);
+        if (!progressElement) return;
+
+        const stepElement = progressElement.querySelector(`[data-step="${step}"]`);
+        if (!stepElement) return;
+
+        // Show the step when it starts or completes
+        if (status === 'started' || status === 'completed') {
+            stepElement.style.display = 'flex';
+        }
+
+        // Update step status
+        stepElement.className = `progress-step ${status}`;
+
+        // Update message
+        const messageSpan = stepElement.querySelector('span');
+        if (messageSpan) {
+            messageSpan.textContent = message;
+        }
+
+        // Update icon based on status
+        const icon = stepElement.querySelector('i');
+        if (icon) {
+            if (status === 'completed') {
+                icon.className = 'fas fa-check text-success';
+            } else if (status === 'error') {
+                icon.className = 'fas fa-times text-danger';
+            } else if (status === 'started') {
+                icon.className = 'fas fa-spinner fa-spin text-primary';
+            }
+        }
+
+        // Add data display if available
+        if (data && step === 'generate_sql' && data.sql_query) {
+            const sqlContainer = document.createElement('div');
+            sqlContainer.className = 'sql-preview mt-2';
+            sqlContainer.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Generated SQL:</strong>
+                    <pre class="mt-1"><code>${data.sql_query}</code></pre>
+                </div>
+            `;
+            stepElement.appendChild(sqlContainer);
+        }
+
+        if (data && step === 'execute_query' && data.row_count !== undefined) {
+            const dataContainer = document.createElement('div');
+            dataContainer.className = 'data-preview mt-2';
+
+            let dataHTML = `
+                <div class="alert alert-success">
+                    <strong>Query Results:</strong> Retrieved ${data.row_count} rows, ${data.column_count} columns
+                </div>
+            `;
+
+            // Add dataframe preview if available
+            if (data.dataframe_data && data.columns && data.dataframe_data.length > 0) {
+                dataHTML += `
+                    <div class="dataframe-preview mt-2">
+                        <h6><i class="fas fa-table"></i> Data Preview (First ${Math.min(data.dataframe_data.length, 10)} rows)</h6>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover table-sm">
+                                <thead class="table-dark">
+                                    <tr>
+                                        ${data.columns.map(col => `<th scope="col">${col}</th>`).join('')}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.dataframe_data.map(row => `
+                                        <tr>
+                                            ${data.columns.map(col => `<td>${row[col] || ''}</td>`).join('')}
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ${data.total_rows > 10 ? `<small class="text-muted">Showing first 10 rows of ${data.total_rows} total rows</small>` : ''}
+                    </div>
+                `;
+            }
+
+            dataContainer.innerHTML = dataHTML;
+            stepElement.appendChild(dataContainer);
+        }
+
+        if (data && step === 'format_results' && data.natural_response) {
+            const resultsContainer = document.createElement('div');
+            resultsContainer.className = 'results-preview mt-2';
+            resultsContainer.innerHTML = `
+                <div class="alert alert-primary">
+                    <strong>Formatted Response:</strong>
+                    <div class="mt-2">${data.natural_response}</div>
+                </div>
+            `;
+            stepElement.appendChild(resultsContainer);
+        }
+
+        if (data && step === 'generate_chart' && data.has_chart) {
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-preview mt-2';
+
+            let chartHTML = `
+                <div class="alert alert-warning">
+                    <strong>Chart Generated:</strong>
+                    <div class="mt-2">
+                        <i class="fas fa-chart-bar"></i> Visualization has been generated successfully.
+                    </div>
+                </div>
+            `;
+
+            // Add chart if plot data is available
+            if (data.plot_data && data.plot_layout) {
+                const chartId = `chart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                chartHTML += `
+                    <div class="chart-container mt-2">
+                        <div id="${chartId}" style="width: 100%; height: 500px;"></div>
+                    </div>
+                `;
+
+                chartContainer.innerHTML = chartHTML;
+                stepElement.appendChild(chartContainer);
+
+                // Render the chart after a short delay to ensure DOM is ready
+                setTimeout(() => {
+                    this.renderProgressChart(chartId, data.plot_data, data.plot_layout, data.plot_config);
+                }, 100);
+            } else {
+                chartContainer.innerHTML = chartHTML;
+                stepElement.appendChild(chartContainer);
+            }
+        }
+
+        this.scrollToBottom();
+    }
+
+    renderProgressChart(chartId, plotData, plotLayout, plotConfig = {}) {
+        console.log('Rendering progress chart with ID:', chartId);
+        console.log('Plot data:', plotData);
+        console.log('Plot layout:', plotLayout);
+
+        // Check if the element exists
+        const chartElement = document.getElementById(chartId);
+        if (!chartElement) {
+            console.error('Progress chart element not found:', chartId);
+            return;
+        }
+
+        try {
+            if (!plotData || !plotLayout) {
+                console.log('No plot data provided for progress chart');
+                chartElement.innerHTML = '<div class="alert alert-warning">No chart data available</div>';
+                return;
+            }
+
+            // Check if plotData is an array and has content
+            if (!Array.isArray(plotData) || plotData.length === 0) {
+                console.log('Progress chart plot data is not an array or is empty:', plotData);
+                chartElement.innerHTML = '<div class="alert alert-warning">Chart data is empty or invalid</div>';
+                return;
+            }
+
+            // Check the first trace
+            const firstTrace = plotData[0];
+            console.log('Progress chart first trace:', firstTrace);
+
+            // Check for data in the first trace
+            const hasData = firstTrace.x || firstTrace.y || firstTrace.values || firstTrace.labels;
+            if (!hasData) {
+                console.log('Progress chart first trace has no data fields:', firstTrace);
+                chartElement.innerHTML = '<div class="alert alert-warning">Chart trace has no data</div>';
+                return;
+            }
+
+            // Merge default config with provided config
+            const defaultConfig = {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                displaylogo: false,
+                useResizeHandler: true,
+                autosize: true
+            };
+            const finalConfig = { ...defaultConfig, ...plotConfig };
+
+            // Render the chart with Plotly
+            console.log('Rendering progress chart with Plotly...');
+            Plotly.newPlot(chartId, plotData, plotLayout, finalConfig).then(() => {
+                // Ensure the chart resizes to fit the container
+                Plotly.Plots.resize(chartId);
+                console.log('Progress chart rendered successfully');
+            });
+
+        } catch (error) {
+            console.error('Error rendering progress chart:', error);
+            chartElement.innerHTML = '<div class="alert alert-danger">Error rendering chart: ' + error.message + '</div>';
+        }
+    }
+
     addMessage(role, content, chartData = null, vizCode = null, isError = false, hasChart = false, hasReport = false, hasData = false, queryId = null, dataframeData = null, columns = null, rowCount = null, columnCount = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `${role}-message message-enter`;
@@ -178,17 +545,17 @@ class ChatInterface {
                 <p><strong>Rows:</strong> ${rowCount} | <strong>Columns:</strong> ${columnCount}</p>
             </div>
         `;
-        
+
         // Create table
         let tableHTML = '<div class="table-responsive"><table class="table table-striped table-hover table-sm">';
-        
+
         // Header row
         tableHTML += '<thead class="table-dark"><tr>';
         columns.forEach(col => {
             tableHTML += `<th scope="col">${col}</th>`;
         });
         tableHTML += '</tr></thead>';
-        
+
         // Data rows (limit to first 50 rows for performance)
         tableHTML += '<tbody>';
         const displayData = data.slice(0, 50);
