@@ -2,10 +2,12 @@ from typing import Dict, List, Any, Optional
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 from config.state import ToolResult
+from config.config import Config
 from tools.database_manager import DatabaseManager
 from tools.vector_store import FAISSVectorStore
 from tools.llm_manager import LLMManager
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +184,72 @@ class DBQueryTool(BaseTool):
         super().__init__()
         self._db_manager = db_manager
     
-    def _run(self, sql_query: str) -> ToolResult:
-        """Execute SQL query"""
+    def _extract_table_name(self, sql_query: str) -> Optional[str]:
+        """Extract table name from SQL query"""
         try:
-            # Execute the query
+            # Remove comments and normalize whitespace
+            clean_query = re.sub(r'--.*$', '', sql_query, flags=re.MULTILINE)
+            clean_query = re.sub(r'/\*.*?\*/', '', clean_query, flags=re.DOTALL)
+            clean_query = ' '.join(clean_query.split())
+            
+            # Look for FROM clause
+            from_match = re.search(r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)', clean_query, re.IGNORECASE)
+            if from_match:
+                return from_match.group(1)
+            
+            # Look for JOIN clauses
+            join_match = re.search(r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)', clean_query, re.IGNORECASE)
+            if join_match:
+                return join_match.group(1)
+                
+            return None
+        except Exception as e:
+            logger.warning(f"Error extracting table name from query: {e}")
+            return None
+    
+    def _validate_table_name(self, table_name: str) -> bool:
+        """Validate that table name exists in config.TABLES"""
+        return table_name in Config.TABLES
+    
+    def _fallback_query(self, table_name: str) -> ToolResult:
+        """Fallback method to select all data from the specified table"""
+        try:
+            if not self._validate_table_name(table_name):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Table '{table_name}' is not in the allowed tables list: {Config.TABLES}"
+                )
+            
+            # Create a simple SELECT * query
+            fallback_sql = f"SELECT * FROM {table_name} LIMIT 1000"
+            logger.info(f"Executing fallback query: {fallback_sql}")
+            
+            results = self._db_manager.execute_query(fallback_sql)
+            
+            return ToolResult(
+                success=True,
+                data=results,
+                metadata={
+                    'rows_returned': len(results) if hasattr(results, '__len__') else 0,
+                    'query_type': 'FALLBACK_SELECT',
+                    'fallback_used': True,
+                    'table_name': table_name
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in fallback query: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Fallback query failed: {str(e)}"
+            )
+    
+    def _run(self, sql_query: str) -> ToolResult:
+        """Execute SQL query with fallback to select all from table"""
+        try:
+            # Execute the original query
             results = self._db_manager.execute_query(sql_query)
             
             return ToolResult(
@@ -193,17 +257,28 @@ class DBQueryTool(BaseTool):
                 data=results,
                 metadata={
                     'rows_returned': len(results) if hasattr(results, '__len__') else 0,
-                    'query_type': 'SELECT' if 'SELECT' in sql_query.upper() else 'OTHER'
+                    'query_type': 'SELECT' if 'SELECT' in sql_query.upper() else 'OTHER',
+                    'fallback_used': False
                 }
             )
                 
         except Exception as e:
-            logger.error(f"Error executing SQL query: {e}")
-            return ToolResult(
-                success=False,
-                data=None,
-                error=str(e)
-            )
+            logger.warning(f"Original query failed: {e}")
+            logger.info("Attempting fallback method...")
+            
+            # Extract table name from the failed query
+            table_name = self._extract_table_name(sql_query)
+            
+            if table_name:
+                logger.info(f"Extracted table name: {table_name}")
+                return self._fallback_query(table_name)
+            else:
+                logger.error("Could not extract table name from query for fallback")
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Original query failed and could not extract table name for fallback: {str(e)}"
+                )
 
 class ResultFormatterTool(BaseTool):
     name: str = "result_formatter"
