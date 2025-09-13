@@ -55,18 +55,9 @@ class PDFStyleManager:
         except Exception as e:
             print(f"Warning: Error registering fonts: {e}")
 
-    def convert_digits_to_arabic(self, text: str) -> str:
-        """Convert Western digits to Arabic-Indic digits"""
-        western = "0123456789"
-        arabic_indic = "٠١٢٣٤٥٦٧٨٩"
-        trans = str.maketrans(western, arabic_indic)
-        return text.translate(trans)
-
     def reshape_text(self, text: str, language: str = "en") -> str:
         """Reshape text for Arabic if needed"""
         if language == "ar":
-            # # Convert digits to Arabic-Indic
-            # text = self.convert_digits_to_arabic(text)
             # Reshape Arabic text
             reshaped = arabic_reshaper.reshape(text)
             return get_display(reshaped)
@@ -232,13 +223,3 @@ class PDFStyleManager:
         }
 
         return custom_styles
-
-    def get_mixed_text_style(self, text: str, base_style: str = 'body') -> str:
-        """Determine if text contains Arabic characters and return appropriate style"""
-        # Check if text contains Arabic characters
-        has_arabic = any('\u0600' <= char <= '\u06FF' for char in text)
-        
-        if has_arabic:
-            return f"{base_style}_arabic" if f"{base_style}_arabic" in self.create_styles('ar') else base_style
-        else:
-            return base_style
