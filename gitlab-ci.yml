@@ -14,34 +14,23 @@ variables:
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
 
-# This block runs before any job, setting up the dynamic variables
-
-before_script:
-
+# Helper function to set up dynamic variables
+.setup_variables: &setup_variables
   - |
-
     echo "Setting up dynamic environment variables for branch: $CI_COMMIT_BRANCH"
-
+    
     # 1. Determine the environment suffix from the branch name
-
     if [ "$CI_COMMIT_BRANCH" == "main" ]; then
-
       export ENV_SUFFIX="dev"
-
     else
-
       export ENV_SUFFIX="$CI_COMMIT_BRANCH"
-
     fi
-
+    
     # 2. Construct the final service and image names and export them
-
     export FINAL_SERVICE_NAME="${BASE_SERVICE_NAME}-${ENV_SUFFIX}"
-
     export FINAL_IMAGE_NAME="${IMAGE_REPO}/${FINAL_SERVICE_NAME}"
-
+    
     echo "Final Service Name: $FINAL_SERVICE_NAME"
-
     echo "Final Image Name: $FINAL_IMAGE_NAME"
 
 run_tests:
@@ -67,24 +56,28 @@ build:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
+    - *setup_variables
     - docker info
   script:
     - cd agentic_version
     - echo "Building Docker image for OpenData AI Bot..."
+    - echo "Image name: ${FINAL_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
     - docker build --tag "${FINAL_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}" .
     - docker build --tag "${FINAL_IMAGE_NAME}:latest" .
     - echo "Docker image built successfully"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "enhance_pdf_arabic"'
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "uat"'
 
 push:
   stage: push
   image: google/cloud-sdk:latest
   before_script:
+    - *setup_variables
     - echo "Authenticating with GCP Artifact Registry..."
     - gcloud auth configure-docker ${GCP_REGION}-docker.pkg.dev --quiet
   script:
     - echo "Pushing Docker images to GCP Artifact Registry..."
+    - echo "Image name: ${FINAL_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
     - docker push "${FINAL_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}"
     - docker push "${FINAL_IMAGE_NAME}:latest"
     - echo "Images pushed successfully:"
