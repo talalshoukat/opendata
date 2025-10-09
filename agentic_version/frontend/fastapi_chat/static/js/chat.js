@@ -7,6 +7,7 @@ class ChatInterface {
         this.typingIndicator = document.getElementById('typingIndicator');
         this.statusBadge = document.getElementById('statusBadge');
         this.chatHistory = [];
+        this.chartCache = {}; // Store pre-generated chart data
         
         this.initializeEventListeners();
         this.loadExampleQueries();
@@ -115,6 +116,7 @@ class ChatInterface {
             let columns = null;
             let rowCount = null;
             let columnCount = null;
+            let chartData = null;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -151,6 +153,16 @@ class ChatInterface {
                                 columns = data.columns;
                                 rowCount = data.row_count;
                                 columnCount = data.column_count;
+                                
+                                // Store chart data if available
+                                if (data.plot_data && data.plot_layout) {
+                                    chartData = {
+                                        plot_data: data.plot_data,
+                                        plot_layout: data.plot_layout,
+                                        plot_config: data.plot_config || {}
+                                    };
+                                    console.log('Chart data stored for query:', queryId);
+                                }
                             }
                         } catch (e) {
                             console.error('Error parsing streaming data:', e);
@@ -181,6 +193,12 @@ class ChatInterface {
                         if (dataframeData && columns && rowCount && columnCount) {
                             const dataframeContainer = this.createDataframeContainer(dataframeData, columns, rowCount, columnCount);
                             existingContent.appendChild(dataframeContainer);
+                        }
+
+                        // Store chart data in cache if available
+                        if (chartData && queryId) {
+                            this.chartCache[queryId] = chartData;
+                            console.log('Chart data cached for query:', queryId);
                         }
 
                         // Add action buttons if available
@@ -927,77 +945,140 @@ function exportChat() {
 }
 
 async function generateChart(queryId) {
+    // Find the button and add loading state
+    const chartButtons = document.querySelectorAll(`button[onclick="generateChart('${queryId}')"]`);
+    const chartButton = chartButtons[0];
+    
+    if (chartButton) {
+        chartButton.disabled = true;
+        chartButton.classList.add('loading');
+        const originalHTML = chartButton.innerHTML;
+        chartButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+        
+        // Store original HTML for later restoration
+        chartButton.dataset.originalHtml = originalHTML;
+    }
+    
     try {
         console.log('Generating chart for query ID:', queryId);
         
-        const response = await fetch(`/api/chart/${queryId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
+        // Check if chart data is already cached
+        const cachedChartData = window.chatInterface.chartCache[queryId];
+        let plotData, plotLayout, plotConfig;
         
-        const data = await response.json();
-        console.log('Chart API response:', data);
-        
-        if (data.success) {
-            console.log('Chart API returned success, processing response...');
-            console.log('Chart data received:', data.chart_data);
-            console.log('Plot data received:', data.plot_data);
-            console.log('Plot layout received:', data.plot_layout);
-            console.log('Plot config received:', data.plot_config);
-            
-            // Find the message with this query ID and add the chart
-            const messageElement = document.querySelector(`[data-query-id="${queryId}"]`);
-            console.log('Looking for message element with query ID:', queryId);
-            console.log('Found message element:', messageElement);
-            
-            if (messageElement) {
-                console.log('Found message element, creating chart container');
-                try {
-                    // Find the message-content div or the action buttons container
-                    let targetElement = messageElement.querySelector('.message-content');
-                    if (!targetElement) {
-                        targetElement = messageElement;
-                    }
-                    
-                    // Check if chart already exists
-                    const existingChart = targetElement.querySelector('.chart-container');
-                    if (existingChart) {
-                        existingChart.remove();
-                    }
-                    
-                    // Create chart container with Plotly data
-                    const chartContainer = window.chatInterface.createChartContainer(data.plot_data, data.plot_layout, data.plot_config);
-                    console.log('Chart container created with Plotly data:', chartContainer);
-                    
-                    // Append after action buttons if they exist
-                    const actionButtons = targetElement.querySelector('.action-buttons');
-                    if (actionButtons) {
-                        actionButtons.parentNode.insertBefore(chartContainer, actionButtons.nextSibling);
-                    } else {
-                        targetElement.appendChild(chartContainer);
-                    }
-                    
-                    console.log('Chart container appended to message element');
-                    window.chatInterface.scrollToBottom();
-                    console.log('Chart generation completed successfully');
-                } catch (error) {
-                    console.error('Error creating or appending chart container:', error);
-                    alert('Error creating chart: ' + error.message);
+        if (cachedChartData) {
+            console.log('Using cached chart data - instant load!');
+            plotData = cachedChartData.plot_data;
+            plotLayout = cachedChartData.plot_layout;
+            plotConfig = cachedChartData.plot_config || {};
+        } else {
+            console.log('No cached data, fetching from API');
+            // Fetch from API if not cached
+            const response = await fetch(`/api/chart/${queryId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
                 }
-            } else {
-                console.error('Message element not found for query ID:', queryId);
-                console.log('Available elements with data-query-id:', document.querySelectorAll('[data-query-id]'));
-                alert('Could not find the message to add chart to.');
+            });
+            
+            const data = await response.json();
+            console.log('Chart API response:', data);
+            
+            if (!data.success) {
+                console.error('Chart generation failed:', data.error);
+                alert(`Error generating chart: ${data.error}`);
+                // Restore button state
+                if (chartButton) {
+                    chartButton.disabled = false;
+                    chartButton.classList.remove('loading');
+                    chartButton.innerHTML = chartButton.dataset.originalHtml;
+                }
+                return;
+            }
+            
+            plotData = data.plot_data;
+            plotLayout = data.plot_layout;
+            plotConfig = data.plot_config || {};
+            
+            // Cache the data for future use
+            window.chatInterface.chartCache[queryId] = {
+                plot_data: plotData,
+                plot_layout: plotLayout,
+                plot_config: plotConfig
+            };
+        }
+        
+        // Find the message with this query ID and add the chart
+        const messageElement = document.querySelector(`[data-query-id="${queryId}"]`);
+        console.log('Looking for message element with query ID:', queryId);
+        console.log('Found message element:', messageElement);
+        
+        if (messageElement) {
+            console.log('Found message element, creating chart container');
+            try {
+                // Find the message-content div or the action buttons container
+                let targetElement = messageElement.querySelector('.message-content');
+                if (!targetElement) {
+                    targetElement = messageElement;
+                }
+                
+                // Check if chart already exists
+                const existingChart = targetElement.querySelector('.chart-container');
+                if (existingChart) {
+                    console.log('Chart already exists, not re-rendering');
+                    return; // Don't create duplicate chart
+                }
+                
+                // Create chart container with Plotly data
+                const chartContainer = window.chatInterface.createChartContainer(plotData, plotLayout, plotConfig);
+                console.log('Chart container created with Plotly data:', chartContainer);
+                
+                // Append after action buttons if they exist
+                const actionButtons = targetElement.querySelector('.action-buttons');
+                if (actionButtons) {
+                    actionButtons.parentNode.insertBefore(chartContainer, actionButtons.nextSibling);
+                } else {
+                    targetElement.appendChild(chartContainer);
+                }
+                
+                console.log('Chart container appended to message element');
+                window.chatInterface.scrollToBottom();
+                console.log('Chart generation completed successfully');
+                
+                // Hide the button after chart is displayed
+                if (chartButton) {
+                    chartButton.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error creating or appending chart container:', error);
+                alert('Error creating chart: ' + error.message);
+                // Restore button state on error
+                if (chartButton) {
+                    chartButton.disabled = false;
+                    chartButton.classList.remove('loading');
+                    chartButton.innerHTML = chartButton.dataset.originalHtml;
+                }
             }
         } else {
-            console.error('Chart generation failed:', data.error);
-            alert(`Error generating chart: ${data.error}`);
+            console.error('Message element not found for query ID:', queryId);
+            console.log('Available elements with data-query-id:', document.querySelectorAll('[data-query-id]'));
+            alert('Could not find the message to add chart to.');
+            // Restore button state on error
+            if (chartButton) {
+                chartButton.disabled = false;
+                chartButton.classList.remove('loading');
+                chartButton.innerHTML = chartButton.dataset.originalHtml;
+            }
         }
     } catch (error) {
         console.error('Error generating chart:', error);
         alert('Error generating chart. Please try again.');
+        // Restore button state on error
+        if (chartButton) {
+            chartButton.disabled = false;
+            chartButton.classList.remove('loading');
+            chartButton.innerHTML = chartButton.dataset.originalHtml;
+        }
     }
 }
 

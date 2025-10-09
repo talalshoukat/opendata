@@ -823,52 +823,52 @@ async def process_chat_message_streaming(chat_request: ChatRequest):
 
             # Step 6: Generate chart (optional)
             if state.sql_execution_result is not None and not state.sql_execution_result.empty:
+                # progress = ProgressUpdate(
+                #     step="generate_chart",
+                #     status="started",
+                #     message="Generating visualization...",
+                #     timestamp=datetime.now().isoformat()
+                # )
+                # yield f"data: {progress.json()}\n\n"
+                #
+                # state = agent._generate_chart_node(state)
+                # if state.errors:
+                #     progress = ProgressUpdate(
+                #         step="generate_chart",
+                #         status="error",
+                #         message=f"Chart generation failed: {state.errors[-1]}",
+                #         timestamp=datetime.now().isoformat()
+                #     )
+                #     yield f"data: {progress.json()}\n\n"
+                # else:
+                # Execute the visualization code to generate plot data
+                plot_data = None
+                plot_layout = None
+                plot_config = None
+
+                if hasattr(state, 'visualization_code') and state.visualization_code and state.sql_execution_result is not None:
+                    try:
+                        plot_result = execute_visualization_code(state.visualization_code, state.sql_execution_result)
+                        plot_data = plot_result.get('data')
+                        plot_layout = plot_result.get('layout')
+                        plot_config = plot_result.get('config')
+                    except Exception as e:
+                        print(f"Error executing visualization code: {e}")
+
                 progress = ProgressUpdate(
                     step="generate_chart",
-                    status="started",
-                    message="Generating visualization...",
+                    status="completed",
+                    message="Chart generated successfully.",
+                    data={
+                        "visualization_code": state.visualization_code if hasattr(state, 'visualization_code') else None,
+                        "has_chart": True,
+                        "plot_data": plot_data,
+                        "plot_layout": plot_layout,
+                        "plot_config": plot_config
+                    },
                     timestamp=datetime.now().isoformat()
                 )
                 yield f"data: {progress.json()}\n\n"
-
-                state = agent._generate_chart_node(state)
-                if state.errors:
-                    progress = ProgressUpdate(
-                        step="generate_chart",
-                        status="error",
-                        message=f"Chart generation failed: {state.errors[-1]}",
-                        timestamp=datetime.now().isoformat()
-                    )
-                    yield f"data: {progress.json()}\n\n"
-                else:
-                    # Execute the visualization code to generate plot data
-                    plot_data = None
-                    plot_layout = None
-                    plot_config = None
-
-                    if hasattr(state, 'visualization_code') and state.visualization_code and state.sql_execution_result is not None:
-                        try:
-                            plot_result = execute_visualization_code(state.visualization_code, state.sql_execution_result)
-                            plot_data = plot_result.get('data')
-                            plot_layout = plot_result.get('layout')
-                            plot_config = plot_result.get('config')
-                        except Exception as e:
-                            print(f"Error executing visualization code: {e}")
-
-                    progress = ProgressUpdate(
-                        step="generate_chart",
-                        status="completed",
-                        message="Chart generated successfully.",
-                        data={
-                            "visualization_code": state.visualization_code if hasattr(state, 'visualization_code') else None,
-                            "has_chart": True,
-                            "plot_data": plot_data,
-                            "plot_layout": plot_layout,
-                            "plot_config": plot_config
-                        },
-                        timestamp=datetime.now().isoformat()
-                    )
-                    yield f"data: {progress.json()}\n\n"
 
             # Check if chart and report data are available
             has_data = (hasattr(state, 'sql_execution_result') and

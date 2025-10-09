@@ -176,7 +176,7 @@ class AgentPlanner:
         workflow.add_node("generate_sql", self._generate_sql_node)
         workflow.add_node("execute_query", self._execute_query_node)
         workflow.add_node("format_results", self._format_results_node)
-        workflow.add_node("generate_chart", self._generate_chart_node)
+        # workflow.add_node("generate_chart", self._generate_chart_node)
         workflow.add_node("handle_error", self._handle_error_node)
         
         # Define the workflow edges
@@ -232,20 +232,20 @@ class AgentPlanner:
             "format_results",
             self._should_continue,
             {
-                "continue": "generate_chart",
-                "error": "handle_error"
-            }
-        )
-        
-        workflow.add_conditional_edges(
-            "generate_chart",
-            self._should_continue,
-            {
                 "continue": END,
                 "error": "handle_error"
             }
         )
-        
+
+        # workflow.add_conditional_edges(
+        #     "generate_chart",
+        #     self._should_continue,
+        #     {
+        #         "continue": END,
+        #         "error": "handle_error"
+        #     }
+        # )
+
         # Error handling
         workflow.add_edge("handle_error", END)
         
