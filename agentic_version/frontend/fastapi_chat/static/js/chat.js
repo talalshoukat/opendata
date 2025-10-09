@@ -863,7 +863,7 @@ class ChatInterface {
                 type: 'bar',
                 name: 'Data',
                 marker: {
-                    color: '#1f77b4'
+                    color: '#00C100'
                 }
             };
             
@@ -965,7 +965,7 @@ class ChatInterface {
         welcomeMessage.innerHTML = `
             <div class="assistant-message">
                 <div class="message-content">
-                    <i class="fas fa-robot"></i> Hello! I'm your AI assistant. Ask me anything about your data in natural language.
+                    <i class="fas fa-robot"></i> Hello! I'm your GOSI Data assistant. Ask me anything about your data in natural language.
                 </div>
                 <div class="message-time">${new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}</div>
             </div>

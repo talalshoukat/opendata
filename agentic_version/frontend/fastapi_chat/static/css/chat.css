@@ -13,22 +13,47 @@ body {
 
 /* Sidebar Styles */
 .sidebar {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #00004C 0%, #000080 100%);
     color: white;
     padding: 20px;
     height: 100vh;
     overflow-y: auto;
 }
 
+/* Logo Styles */
+.logo-container {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.gosi-logo {
+    max-width: 150px;
+    height: auto;
+    filter: brightness(0) invert(1);
+}
+
+.header-logo {
+    height: 40px;
+    width: auto;
+    margin-right: 15px;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+}
+
 .sidebar-header h4 {
     color: white;
     margin-bottom: 10px;
     font-weight: 600;
+    text-align: center;
 }
 
 .sidebar-header p {
     color: rgba(255, 255, 255, 0.8);
     font-size: 0.9rem;
+    text-align: center;
 }
 
 .sidebar-content {
@@ -69,8 +94,9 @@ body {
 }
 
 .chat-actions .btn:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.5);
+    background-color: #00C100;
+    border-color: #00C100;
+    color: white;
 }
 
 /* Chat Container Styles */
@@ -93,13 +119,17 @@ body {
 
 .chat-header h3 {
     margin: 0;
-    color: #495057;
+    color: #00004C;
     font-weight: 600;
 }
 
 .status-indicator .badge {
     font-size: 0.8rem;
     padding: 6px 12px;
+}
+
+.status-indicator .badge.bg-success {
+    background-color: #00C100 !important;
 }
 
 /* Chat Messages Styles */
@@ -130,7 +160,7 @@ body {
 }
 
 .message-content {
-    background: #007bff;
+    background: #00004C;
     color: white;
     padding: 12px 16px;
     border-radius: 18px 18px 4px 18px;
@@ -220,7 +250,7 @@ body {
     padding: 12px;
     background-color: #f8f9fa;
     border-radius: 6px;
-    border-left: 4px solid #17a2b8;
+    border-left: 4px solid #00C100;
 }
 
 .dataframe-summary h6 {
@@ -258,7 +288,7 @@ body {
 .table th {
     position: sticky;
     top: 0;
-    background-color: #343a40 !important;
+    background-color: #00004C !important;
     color: white;
     font-weight: 600;
     border: none;
@@ -295,8 +325,8 @@ body {
 }
 
 .input-group .form-control:focus {
-    border-color: #007bff;
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    border-color: #00004C;
+    box-shadow: 0 0 0 0.2rem rgba(0, 0, 76, 0.25);
 }
 
 .input-group .btn {
@@ -304,6 +334,20 @@ body {
     padding: 12px 20px;
     margin-left: 10px;
     font-weight: 600;
+}
+
+.input-group .btn-primary {
+    background-color: #00C100;
+    border-color: #00C100;
+}
+
+.input-group .btn-primary:hover {
+    background-color: #009900;
+    border-color: #009900;
+}
+
+.input-group .btn-primary:focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 193, 0, 0.25);
 }
 
 /* Responsive Design */
@@ -354,14 +398,14 @@ body {
 }
 
 .progress-step.started {
-    background-color: #e3f2fd;
-    border-color: #2196f3;
+    background-color: #e6e6f2;
+    border-color: #00004C;
     opacity: 1;
 }
 
 .progress-step.completed {
-    background-color: #e8f5e8;
-    border-color: #4caf50;
+    background-color: #e6f7e6;
+    border-color: #00C100;
     opacity: 1;
 }
 
@@ -384,7 +428,7 @@ body {
 }
 
 .progress-step.completed span {
-    color: #2e7d32;
+    color: #00C100;
 }
 
 .progress-step.error span {
@@ -392,7 +436,7 @@ body {
 }
 
 .progress-step.started span {
-    color: #1565c0;
+    color: #00004C;
 }
 
 .sql-preview, .data-preview {
@@ -596,6 +640,28 @@ body {
 .action-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.action-btn.btn-outline-primary {
+    color: #00004C;
+    border-color: #00004C;
+}
+
+.action-btn.btn-outline-primary:hover {
+    background-color: #00004C;
+    border-color: #00004C;
+    color: white;
+}
+
+.action-btn.btn-outline-success {
+    color: #00C100;
+    border-color: #00C100;
+}
+
+.action-btn.btn-outline-success:hover {
+    background-color: #00C100;
+    border-color: #00C100;
+    color: white;
 }
 
 .action-btn i {
