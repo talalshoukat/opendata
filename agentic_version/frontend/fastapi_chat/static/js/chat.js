@@ -163,39 +163,48 @@ class ChatInterface {
             const progressElement = document.getElementById(progressMessageId);
             if (progressElement && finalResponse) {
                 if (finalResponse.success) {
-//                    // Add final response section to existing content
-//                    const existingContent = progressElement.querySelector('.message-content');
-//                    if (existingContent) {
-//                        const finalResponseDiv = document.createElement('div');
-//                        finalResponseDiv.className = 'final-response mt-3';
-//                        finalResponseDiv.innerHTML = `
-//                            <strong>Final Response:</strong><br>
-//                            ${finalResponse.message}
-//                        `;
-//                        existingContent.appendChild(finalResponseDiv);
-//
-//                        // Add dataframe if available
-//                        if (dataframeData && columns && rowCount && columnCount) {
-//                            const dataframeContainer = this.createDataframeContainer(dataframeData, columns, rowCount, columnCount);
-//                            existingContent.appendChild(dataframeContainer);
-//                        }
-//
-//                        // Add action buttons if available
-//                        if (hasChart || hasReport || hasData) {
-//                            const actionButtons = this.createActionButtons(hasChart, hasReport, hasData, queryId);
-//                            existingContent.appendChild(actionButtons);
-//                        }
-//                    }
+                    // Hide progress steps container
+                    const progressSteps = progressElement.querySelector('.progress-steps');
+                    if (progressSteps) {
+                        progressSteps.style.display = 'none';
+                    }
+                    
+                    // Add final response section to existing content
+                    const existingContent = progressElement.querySelector('.message-content');
+                    if (existingContent) {
+                        const finalResponseDiv = document.createElement('div');
+                        finalResponseDiv.className = 'final-response';
+                        finalResponseDiv.innerHTML = `${finalResponse.message}`;
+                        existingContent.appendChild(finalResponseDiv);
+
+                        // Add dataframe if available
+                        if (dataframeData && columns && rowCount && columnCount) {
+                            const dataframeContainer = this.createDataframeContainer(dataframeData, columns, rowCount, columnCount);
+                            existingContent.appendChild(dataframeContainer);
+                        }
+
+                        // Add action buttons if available
+                        if (hasChart || hasReport || hasData) {
+                            const actionButtons = this.createActionButtons(hasChart, hasReport, hasData, queryId);
+                            existingContent.appendChild(actionButtons);
+                        }
+                    }
 
                     // Update the class to be a regular assistant message
                     progressElement.className = 'assistant-message message-enter';
-                    progressElement.removeAttribute('id');
+                    progressElement.setAttribute('data-query-id', queryId);
                 } else {
                     // Show error in progress container
                     const existingContent = progressElement.querySelector('.message-content');
                     if (existingContent) {
+                        // Hide progress steps
+                        const progressSteps = progressElement.querySelector('.progress-steps');
+                        if (progressSteps) {
+                            progressSteps.style.display = 'none';
+                        }
+                        
                         const errorDiv = document.createElement('div');
-                        errorDiv.className = 'final-response mt-3 error-message';
+                        errorDiv.className = 'final-response error-message';
                         errorDiv.innerHTML = `
                             <strong>Error:</strong><br>
                             ${finalResponse.message || 'Sorry, I encountered an error processing your request.'}
@@ -217,22 +226,6 @@ class ChatInterface {
                 }
             }
             
-            if (true) {
- /*               console.log('Chat response data:', data);
-                console.log('Has chart:', data.has_chart);
-                console.log('Has report:', data.has_report);
-                console.log('Has data:', data.has_data);
-                console.log('Query ID:', data.query_id);
-*/
-                // Add assistant response with action buttons if available
-                this.addMessage('assistant', '', null, null, false, hasChart, hasReport, false, queryId, false, false, false, false);
-
-//                this.addMessage('assistant', null, null, null, false, true, true, false, false, false, false, false, false);
-            } else {
-                // Show error message
-                this.addMessage('assistant', `Sorry, I encountered an error: ${data.error || 'Unknown error'}`, null, null, true);
-            }
-            
         } catch (error) {
             console.error('Error in streaming chat:', error);
             this.addMessage('assistant', 'Sorry, I encountered a network error. Please try again.', null, null, true);
@@ -249,129 +242,38 @@ class ChatInterface {
         const stepElement = progressElement.querySelector(`[data-step="${step}"]`);
         if (!stepElement) return;
 
-        // Show the step when it starts or completes
-        if (status === 'started' || status === 'completed') {
+        // Only show the step when it starts, hide when completed
+        if (status === 'started') {
             stepElement.style.display = 'flex';
-        }
-
-        // Update step status
-        stepElement.className = `progress-step ${status}`;
-
-        // Update message
-        const messageSpan = stepElement.querySelector('span');
-        if (messageSpan) {
-            messageSpan.textContent = message;
-        }
-
-        // Update icon based on status
-        const icon = stepElement.querySelector('i');
-        if (icon) {
-            if (status === 'completed') {
-                icon.className = 'fas fa-check text-success';
-            } else if (status === 'error') {
-                icon.className = 'fas fa-times text-danger';
-            } else if (status === 'started') {
+            stepElement.className = `progress-step ${status}`;
+            
+            // Update message
+            const messageSpan = stepElement.querySelector('span');
+            if (messageSpan) {
+                messageSpan.textContent = message;
+            }
+            
+            // Update icon for started state
+            const icon = stepElement.querySelector('i');
+            if (icon) {
                 icon.className = 'fas fa-spinner fa-spin text-primary';
             }
-        }
-
-        // Add data display if available
-        if (data && step === 'generate_sql' && data.sql_query) {
-            const sqlContainer = document.createElement('div');
-            sqlContainer.className = 'sql-preview mt-2';
-            sqlContainer.innerHTML = `
-                <div class="alert alert-info">
-                    <strong>Generated SQL:</strong>
-                    <pre class="mt-1"><code>${data.sql_query}</code></pre>
-                </div>
-            `;
-            stepElement.appendChild(sqlContainer);
-        }
-
-        if (data && step === 'execute_query' && data.row_count !== undefined) {
-            const dataContainer = document.createElement('div');
-            dataContainer.className = 'data-preview mt-2';
-
-            let dataHTML = `
-                <div class="alert alert-success">
-                    <strong>Query Results:</strong> Retrieved ${data.row_count} rows, ${data.column_count} columns
-                </div>
-            `;
-
-            // Add dataframe preview if available
-            if (data.dataframe_data && data.columns && data.dataframe_data.length > 0) {
-                dataHTML += `
-                    <div class="dataframe-preview mt-2">
-                        <h6><i class="fas fa-table"></i> Data Preview (First ${Math.min(data.dataframe_data.length, 10)} rows)</h6>
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover table-sm">
-                                <thead class="table-dark">
-                                    <tr>
-                                        ${data.columns.map(col => `<th scope="col">${col}</th>`).join('')}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${data.dataframe_data.map(row => `
-                                        <tr>
-                                            ${data.columns.map(col => `<td>${row[col] || ''}</td>`).join('')}
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                        ${data.total_rows > 10 ? `<small class="text-muted">Showing first 10 rows of ${data.total_rows} total rows</small>` : ''}
-                    </div>
-                `;
+        } else if (status === 'completed') {
+            // Hide completed steps
+            stepElement.style.display = 'none';
+        } else if (status === 'error') {
+            // Show errors
+            stepElement.style.display = 'flex';
+            stepElement.className = `progress-step ${status}`;
+            
+            const messageSpan = stepElement.querySelector('span');
+            if (messageSpan) {
+                messageSpan.textContent = message;
             }
-
-            dataContainer.innerHTML = dataHTML;
-            stepElement.appendChild(dataContainer);
-        }
-
-        if (data && step === 'format_results' && data.natural_response) {
-            const resultsContainer = document.createElement('div');
-            resultsContainer.className = 'results-preview mt-2';
-            resultsContainer.innerHTML = `
-                <div class="alert alert-primary">
-                    <strong>Formatted Response:</strong>
-                    <div class="mt-2">${data.natural_response}</div>
-                </div>
-            `;
-            stepElement.appendChild(resultsContainer);
-        }
-
-        if (data && step === 'generate_chart' && data.has_chart) {
-            const chartContainer = document.createElement('div');
-            chartContainer.className = 'chart-preview mt-2';
-
-            let chartHTML = `
-                <div class="alert alert-warning">
-                    <strong>Chart Generated:</strong>
-                    <div class="mt-2">
-                        <i class="fas fa-chart-bar"></i> Visualization has been generated successfully.
-                    </div>
-                </div>
-            `;
-
-            // Add chart if plot data is available
-            if (data.plot_data && data.plot_layout) {
-                const chartId = `chart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                chartHTML += `
-                    <div class="chart-container mt-2">
-                        <div id="${chartId}" style="width: 100%; height: 500px;"></div>
-                    </div>
-                `;
-
-                chartContainer.innerHTML = chartHTML;
-                stepElement.appendChild(chartContainer);
-
-                // Render the chart after a short delay to ensure DOM is ready
-                setTimeout(() => {
-                    this.renderProgressChart(chartId, data.plot_data, data.plot_layout, data.plot_config);
-                }, 100);
-            } else {
-                chartContainer.innerHTML = chartHTML;
-                stepElement.appendChild(chartContainer);
+            
+            const icon = stepElement.querySelector('i');
+            if (icon) {
+                icon.className = 'fas fa-times text-danger';
             }
         }
 
@@ -538,16 +440,25 @@ class ChatInterface {
         const dataframeDiv = document.createElement('div');
         dataframeDiv.className = 'dataframe-container';
         
-        // Create summary header
+        // Generate unique ID for this dataframe
+        const dataframeId = `dataframe-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Create summary header with toggle button
         const summaryHTML = `
-            <div class="dataframe-summary">
-                <h6><i class="fas fa-table"></i> Data Summary</h6>
-                <p><strong>Rows:</strong> ${rowCount} | <strong>Columns:</strong> ${columnCount}</p>
+            <div class="dataframe-summary" onclick="toggleDataframe('${dataframeId}')" style="cursor: pointer;">
+                <div class="dataframe-summary-content">
+                    <h6><i class="fas fa-table"></i> Data Summary</h6>
+                    <p><strong>Rows:</strong> ${rowCount} | <strong>Columns:</strong> ${columnCount}</p>
+                </div>
+                <div class="dataframe-toggle">
+                    <i class="fas fa-chevron-down" id="${dataframeId}-icon"></i>
+                </div>
             </div>
         `;
 
-        // Create table
-        let tableHTML = '<div class="table-responsive"><table class="table table-striped table-hover table-sm">';
+        // Create table (collapsed by default)
+        let tableHTML = `<div class="table-wrapper collapsed" id="${dataframeId}">`;
+        tableHTML += '<div class="table-responsive"><table class="table table-striped table-hover table-sm">';
 
         // Header row
         tableHTML += '<thead class="table-dark"><tr>';
@@ -574,6 +485,8 @@ class ChatInterface {
         if (data.length > 50) {
             tableHTML += `<div class="dataframe-note"><small class="text-muted">Showing first 50 rows of ${rowCount} total rows</small></div>`;
         }
+        
+        tableHTML += '</div>'; // Close table-wrapper
         
         dataframeDiv.innerHTML = summaryHTML + tableHTML;
         
@@ -1042,10 +955,30 @@ async function generateChart(queryId) {
             if (messageElement) {
                 console.log('Found message element, creating chart container');
                 try {
+                    // Find the message-content div or the action buttons container
+                    let targetElement = messageElement.querySelector('.message-content');
+                    if (!targetElement) {
+                        targetElement = messageElement;
+                    }
+                    
+                    // Check if chart already exists
+                    const existingChart = targetElement.querySelector('.chart-container');
+                    if (existingChart) {
+                        existingChart.remove();
+                    }
+                    
                     // Create chart container with Plotly data
                     const chartContainer = window.chatInterface.createChartContainer(data.plot_data, data.plot_layout, data.plot_config);
                     console.log('Chart container created with Plotly data:', chartContainer);
-                    messageElement.appendChild(chartContainer);
+                    
+                    // Append after action buttons if they exist
+                    const actionButtons = targetElement.querySelector('.action-buttons');
+                    if (actionButtons) {
+                        actionButtons.parentNode.insertBefore(chartContainer, actionButtons.nextSibling);
+                    } else {
+                        targetElement.appendChild(chartContainer);
+                    }
+                    
                     console.log('Chart container appended to message element');
                     window.chatInterface.scrollToBottom();
                     console.log('Chart generation completed successfully');
@@ -1109,6 +1042,23 @@ async function generateReport(queryId) {
     } catch (error) {
         console.error('Error generating report:', error);
         alert('Error generating report. Please try again.');
+    }
+}
+
+function toggleDataframe(dataframeId) {
+    const tableWrapper = document.getElementById(dataframeId);
+    const icon = document.getElementById(`${dataframeId}-icon`);
+    
+    if (tableWrapper && icon) {
+        if (tableWrapper.classList.contains('collapsed')) {
+            tableWrapper.classList.remove('collapsed');
+            tableWrapper.classList.add('expanded');
+            icon.className = 'fas fa-chevron-up';
+        } else {
+            tableWrapper.classList.remove('expanded');
+            tableWrapper.classList.add('collapsed');
+            icon.className = 'fas fa-chevron-down';
+        }
     }
 }
 

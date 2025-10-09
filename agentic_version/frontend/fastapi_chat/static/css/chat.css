@@ -187,14 +187,13 @@ body {
 }
 
 .typing-content {
-    display: flex;
+    display: none;
     align-items: center;
     gap: 8px;
     background: #e9ecef;
     color: #6c757d;
     padding: 12px 16px;
     border-radius: 18px 18px 18px 4px;
-    display: inline-block;
     font-style: italic;
 }
 
@@ -246,11 +245,23 @@ body {
 }
 
 .dataframe-summary {
-    margin-bottom: 16px;
+    margin-bottom: 0;
     padding: 12px;
     background-color: #f8f9fa;
     border-radius: 6px;
     border-left: 4px solid #00C100;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+}
+
+.dataframe-summary:hover {
+    background-color: #e9ecef;
+}
+
+.dataframe-summary-content {
+    flex: 1;
 }
 
 .dataframe-summary h6 {
@@ -263,6 +274,36 @@ body {
     margin: 0;
     color: #6c757d;
     font-size: 0.9rem;
+}
+
+.dataframe-toggle {
+    display: flex;
+    align-items: center;
+    color: #00004C;
+    font-size: 1.2rem;
+    transition: transform 0.3s ease;
+}
+
+.dataframe-toggle i {
+    transition: transform 0.3s ease;
+}
+
+.table-wrapper {
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.table-wrapper.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.table-wrapper.expanded {
+    max-height: 600px;
+    opacity: 1;
+    margin-top: 12px;
+    overflow-y: auto;
 }
 
 .dataframe-note {
@@ -371,6 +412,10 @@ body {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+}
+
+.progress-container .progress-steps[style*="display: none"] {
+    display: none !important;
 }
 
 .progress-steps {
@@ -534,15 +579,14 @@ body {
 }
 
 .final-response {
-    background-color: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 12px;
+    padding: 12px 0;
     margin-top: 12px;
+    line-height: 1.6;
+    color: #495057;
 }
 
 .final-response strong {
-    color: #495057;
+    color: #00004C;
     font-weight: 600;
 }
 
@@ -618,8 +662,14 @@ body {
 
 /* Action buttons styling */
 .action-buttons {
-    margin-top: 12px;
-    padding: 8px 0;
+    margin-top: 16px;
+    padding: 12px 0;
+}
+
+.assistant-message .action-buttons {
+    background-color: transparent;
+    border-top: 1px solid #e9ecef;
+    padding-top: 16px;
 }
 
 .action-buttons-container {
