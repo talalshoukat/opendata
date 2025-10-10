@@ -5,6 +5,7 @@ from sqlalchemy.engine import URL
 import pandas as pd
 from typing import Dict, List, Tuple, Any, Optional
 import logging
+import re
 from config.config import Config
 # from sqlparse import parse
 logging.basicConfig(level=logging.INFO)
@@ -106,14 +107,76 @@ class DatabaseManager:
             schemas[table] = self.get_table_schema(table)
         return schemas
 
+    def extract_table_name(self, query: str) -> Optional[str]:
+        """Extract the main table name from a SQL query, removing CTEs and handling multiple tables"""
+        try:
+            # Remove CTEs (WITH clauses) from the query
+            query_without_cte = re.sub(r'WITH\s+.*?\s+AS\s*\([^)]*\)', '', query, flags=re.IGNORECASE | re.DOTALL)
+            
+            # Remove comments
+            query_without_cte = re.sub(r'--.*?\n', ' ', query_without_cte)
+            query_without_cte = re.sub(r'/\*.*?\*/', ' ', query_without_cte, flags=re.DOTALL)
+            
+            # Look for FROM clause with table name
+            # Pattern matches: FROM "table_name" or FROM table_name
+            from_pattern = r'FROM\s+["\']?([a-zA-Z_][a-zA-Z0-9_]*)["\']?'
+            from_matches = re.findall(from_pattern, query_without_cte, re.IGNORECASE)
+            
+            if from_matches:
+                # Get the first table (main table in the query)
+                main_table = from_matches[0]
+                
+                # Verify it's in our known tables list
+                if main_table in Config.TABLES:
+                    logger.info(f"Extracted table name: {main_table}")
+                    return main_table
+                
+                # Try to find any table from our config
+                for table in Config.TABLES:
+                    if table.lower() in query_without_cte.lower():
+                        logger.info(f"Found table from config: {table}")
+                        return table
+            
+            # Fallback: search for any table name from Config.TABLES in the query
+            for table in Config.TABLES:
+                if table.lower() in query.lower():
+                    logger.info(f"Fallback: Found table in query: {table}")
+                    return table
+            
+            logger.warning("Could not extract table name from query")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting table name: {e}")
+            return None
+    
     def execute_query(self, query: str) -> pd.DataFrame:
-        """Execute a SQL query and return results as DataFrame"""
+        """Execute a SQL query and return results as DataFrame.
+        If query fails, fallback to retrieving all rows from the main table."""
         try:
             df = pd.read_sql_query(query, self.engine)
+            logger.info(f"Query executed successfully, returned {len(df)} rows")
             return df
         except Exception as e:
             logger.error(f"Error executing query: {e}")
-            raise
+            logger.info("Attempting fallback: retrieving all rows from main table")
+            
+            # Try to extract the table name and get all rows
+            table_name = self.extract_table_name(query)
+            
+            if table_name:
+                try:
+                    fallback_query = f'SELECT * FROM "{table_name}"'
+                    logger.info(f"Executing fallback query: {fallback_query}")
+                    df = pd.read_sql_query(fallback_query, self.engine)
+                    logger.info(f"Fallback query successful, returned {len(df)} rows from {table_name}")
+                    return df
+                except Exception as fallback_error:
+                    logger.error(f"Fallback query also failed: {fallback_error}")
+                    raise Exception(f"Original query failed: {e}. Fallback query also failed: {fallback_error}")
+            else:
+                logger.error("Could not extract table name for fallback")
+                raise Exception(f"Query failed and could not determine table for fallback: {e}")
     
     def get_sample_data(self, table_name: str, limit: int = 5) -> pd.DataFrame:
         """Get sample data from a table for context"""
