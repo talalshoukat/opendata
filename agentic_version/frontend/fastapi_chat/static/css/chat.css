@@ -585,9 +585,110 @@ body {
     color: #495057;
 }
 
+/* Headings in final response */
+.final-response h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #00004C;
+    margin-top: 16px;
+    margin-bottom: 12px;
+    line-height: 1.3;
+    border-bottom: 2px solid #00C100;
+    padding-bottom: 8px;
+}
+
+.final-response h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #00004C;
+    margin-top: 14px;
+    margin-bottom: 10px;
+    line-height: 1.3;
+}
+
+.final-response h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #00004C;
+    margin-top: 12px;
+    margin-bottom: 8px;
+    line-height: 1.3;
+}
+
+.final-response h1:first-child,
+.final-response h2:first-child,
+.final-response h3:first-child {
+    margin-top: 0;
+}
+
+/* Paragraphs */
+.final-response p {
+    margin-bottom: 12px;
+    line-height: 1.7;
+}
+
+.final-response p:last-child {
+    margin-bottom: 0;
+}
+
+/* Bold and italic */
 .final-response strong {
     color: #00004C;
     font-weight: 600;
+}
+
+.final-response em {
+    font-style: italic;
+    color: #495057;
+}
+
+/* Lists */
+.final-response ul,
+.final-response ol {
+    margin: 12px 0;
+    padding-left: 24px;
+}
+
+.final-response ul {
+    list-style-type: disc;
+}
+
+.final-response ol {
+    list-style-type: decimal;
+}
+
+.final-response li {
+    margin-bottom: 6px;
+    line-height: 1.6;
+    color: #495057;
+}
+
+.final-response li strong {
+    color: #00004C;
+}
+
+/* Nested lists */
+.final-response ul ul,
+.final-response ol ol,
+.final-response ul ol,
+.final-response ol ul {
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+/* Line breaks */
+.final-response br {
+    line-height: 1.8;
+}
+
+/* Code-like text (if needed) */
+.final-response code {
+    background-color: #f8f9fa;
+    color: #00004C;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
 }
 
 .progress-step.completed .sql-preview,

@@ -186,7 +186,7 @@ class ChatInterface {
                     if (existingContent) {
                         const finalResponseDiv = document.createElement('div');
                         finalResponseDiv.className = 'final-response';
-                        finalResponseDiv.innerHTML = `${finalResponse.message}`;
+                        finalResponseDiv.innerHTML = this.formatResponse(finalResponse.message);
                         existingContent.appendChild(finalResponseDiv);
 
                         // Add dataframe if available
@@ -253,6 +253,59 @@ class ChatInterface {
         }
     }
 
+    formatResponse(text) {
+        if (!text) return '';
+        
+        // Convert markdown-style formatting to HTML
+        let formatted = text;
+        
+        // Convert ### Heading 3 to <h3>
+        formatted = formatted.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        
+        // Convert ## Heading 2 to <h2>
+        formatted = formatted.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        
+        // Convert # Heading 1 to <h1>
+        formatted = formatted.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        
+        // Convert **bold** to <strong>
+        formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        
+        // Convert *italic* to <em>
+        formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        
+        // Convert bullet points (- item or * item) to <ul><li>
+        formatted = formatted.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+        
+        // Wrap consecutive <li> items in <ul>
+        formatted = formatted.replace(/(<li>.*<\/li>\s*)+/gs, match => {
+            return '<ul>' + match + '</ul>';
+        });
+        
+        // Convert numbered lists (1. item, 2. item) to <ol><li>
+        formatted = formatted.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+        
+        // Wrap consecutive numbered <li> items in <ol>
+        formatted = formatted.replace(/(<li>.*<\/li>\s*)+/gs, match => {
+            // Check if already wrapped in <ul> or <ol>
+            if (!match.includes('<ul>') && !match.includes('<ol>')) {
+                return '<ol>' + match + '</ol>';
+            }
+            return match;
+        });
+        
+        // Convert line breaks to <br> (double newline becomes paragraph break)
+        formatted = formatted.replace(/\n\n/g, '</p><p>');
+        formatted = formatted.replace(/\n/g, '<br>');
+        
+        // Wrap in paragraph tags if not already structured
+        if (!formatted.includes('<h1>') && !formatted.includes('<h2>') && !formatted.includes('<h3>')) {
+            formatted = '<p>' + formatted + '</p>';
+        }
+        
+        return formatted;
+    }
+    
     updateProgressStep(messageId, step, status, message, data) {
         const progressElement = document.getElementById(messageId);
         if (!progressElement) return;

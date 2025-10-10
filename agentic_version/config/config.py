@@ -51,7 +51,7 @@ class Config:
     
     # LLM configuration
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.1'))
-    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '1000'))
+    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '10000'))
     
     # Vector search configuration
     SIMILARITY_THRESHOLD = float(os.getenv('SIMILARITY_THRESHOLD', '0.7'))

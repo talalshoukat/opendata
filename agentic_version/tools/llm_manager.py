@@ -254,6 +254,7 @@ class LLMManager:
         - Keep the response concise but informative
         - Give response in the user's language
         - Focus on key findings and not telling us anything about dataframe rows or columns
+        - Add heading for Key insights or Recommendations.
         
         Response:"""
         
